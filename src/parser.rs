@@ -6,7 +6,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Expr, String> {
 }
 
 fn eval(mut tokens: Vec<Token>) -> Result<Expr, String> {
-    println!("parser eval called with {:?}", tokens); 
+    // println!("parser eval called with {:?}", tokens);
     match tokens.len() {
         0 => Err("No tokens to evaluate".to_string()),
         1 => eval_one(tokens.remove(0)),
@@ -33,16 +33,17 @@ fn eval_right_known(right: Token, mut tokens: Vec<Token>) -> Result<Expr, String
 
 fn eval_monadic(right: Token, op: Token) -> Result<Expr, String> {
     // println!("eval_monadic: {:?}, {:?}", right, op);
-    match (right, op) {
-        (Token::Int(n), Token::Plus)  => Ok(Expr::Int(n)),
-        (Token::Int(n), Token::Minus) => Ok(Expr::Int(-n)),
-        (_, Token::Plus)  => todo!("monadic plus"),
-        (_, Token::Minus) => todo!("monadic minus"),
-        (_, _) => Err("Invalid monadic operation".to_string())
-    }
+    let right_evaled = Box::new(eval_one(right)?);
+    let operator = match op {
+        Token::Plus => Operator::Plus,
+        Token::Minus => Operator::Minus,
+        _ => return Err("eval_monadic: Bad operator".to_string())
+    };
+    Ok(Expr::Monadic { operator: operator, operand: right_evaled })
 }
 
 fn eval_dyadic(right: Token, mut tokens: Vec<Token>) -> Result<Expr, String> {
+    // println!("eval_dyadic: {:?}, {:?}", right, tokens);
     let right_e = match tokens.get(1) {
         Some(Token::Plus) | Some(Token::Minus) => {
             // Two operators in a row = monadic op first
@@ -51,22 +52,13 @@ fn eval_dyadic(right: Token, mut tokens: Vec<Token>) -> Result<Expr, String> {
         },
         _ => Box::new(eval_one(right)?),
     };
-    let op = tokens.remove(0);
+    let op = match tokens.remove(0) {
+        Token::Plus => Operator::Plus,
+        Token::Minus => Operator::Minus,
+        _ => return Err("eval_dyadic: Bad operator".to_string())
+    };
     let next = Box::new(eval(tokens)?);
-
-    match op {
-        Token::Plus => Ok(Expr::Dyadic {
-            operator: Operator::Plus,
-            left: next,
-            right: right_e
-        }),
-        Token::Minus => Ok(Expr::Dyadic {
-            operator: Operator::Minus,
-            left: next,
-            right: right_e
-        }),
-        _ => Err("Invalid dyadic operation".to_string())
-    }
+    Ok(Expr::Dyadic { operator: op, left: next, right: right_e })
 }
 
 #[cfg(test)]
@@ -94,16 +86,22 @@ mod tests {
     #[test]        
     fn simple_monadic() {
         assert_eq!(
-            Err("Invalid monadic operation".to_string()),
+            Err("eval_monadic: Bad operator".to_string()),
             parse(vec![Token::Int(0), Token::Int(0)])
         );
         assert_eq!(
-            Ok(Expr::Int(256)),
+            Ok(Expr::Monadic {
+                operator: Operator::Plus,
+                operand: Box::new(Expr::Int(256))
+            }),
             parse(vec![Token::Plus, Token::Int(256)])
         );
 
         assert_eq!(
-            Ok(Expr::Int(-15)),
+            Ok(Expr::Monadic {
+                operator: Operator::Minus,
+                operand: Box::new(Expr::Int(15))
+            }),
             parse(vec![Token::Minus, Token::Int(15)])
         );
     }
@@ -111,7 +109,7 @@ mod tests {
     #[test]
     fn simple_dyadic() {
         assert_eq!(
-            Err("Invalid dyadic operation".to_string()),
+            Err("eval_dyadic: Bad operator".to_string()),
             parse(vec![Token::Int(0), Token::Int(0), Token::Int(0)])
         );
         assert_eq!(
@@ -134,11 +132,13 @@ mod tests {
             Ok(Expr::Dyadic {
                 operator: Operator::Minus,
                 left: Box::new(Expr::Int(256)),
-                right: Box::new(Expr::Int(-256))
+                right: Box::new(Expr::Monadic {
+                    operator: Operator::Minus,
+                    operand: Box::new(Expr::Int(256))
+                })
             }),
             parse(vec![Token::Int(256), Token::Minus, Token::Minus, Token::Int(256)])
-
-        )
+        );
     }
 
     #[test]
@@ -155,7 +155,6 @@ mod tests {
             }),
             parse(vec![Token::Int(1), Token::Plus, Token::Int(2), Token::Plus, Token::Int(3)])
         );
-
         assert_eq!(
             Ok(Expr::Dyadic {
                 operator: Operator::Plus,
@@ -168,7 +167,10 @@ mod tests {
                     }),
                     right: Box::new(Expr::Int(4))
                 }),
-                right: Box::new(Expr::Int(-8))
+                right: Box::new(Expr::Monadic {
+                    operator: Operator::Minus,
+                    operand: Box::new(Expr::Int(8))
+                })
             }),
             parse(vec![Token::Int(1), Token::Plus,
                        Token::Int(2), Token::Minus,
@@ -182,9 +184,15 @@ mod tests {
                 left: Box::new(Expr::Dyadic {
                     operator: Operator::Plus,
                     left: Box::new(Expr::Int(10)),
-                    right: Box::new(Expr::Int(-20))
+                    right: Box::new(Expr::Monadic {
+                        operator: Operator::Minus,
+                        operand: Box::new(Expr::Int(20))
+                    })
                 }),
-                right: Box::new(Expr::Int(-30))
+                right: Box::new(Expr::Monadic {
+                    operator: Operator::Minus,
+                    operand: Box::new(Expr::Int(30))
+                })
             }),
             parse(vec![Token::Int(10), Token::Plus, Token::Minus, Token::Int(20),
                        Token::Plus, Token::Minus, Token::Int(30)])
