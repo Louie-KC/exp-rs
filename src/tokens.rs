@@ -2,5 +2,18 @@
 pub enum Token {
     Int(i32),
     Plus,
-    Minus
+    Minus,
+    Star,
+    Slash,
+    Ident(String),
+    Equal,
+    Let,
+    Function,
+    Colon,
+    Comma,
+    LParen,
+    RParen,
+    LSquirly,
+    RSquirly,
+    EndLine,
 }
