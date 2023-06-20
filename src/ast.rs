@@ -2,6 +2,8 @@
 pub enum Operator {
     Plus,
     Minus,
+    Star,
+    Slash,
 }
 
 #[derive(Debug, PartialEq)]
