@@ -183,8 +183,8 @@ impl Parser {
     // Rule: atom -> "(" expression ")" | Integer | Identifier
     fn atom(&mut self) -> Result<Expr, String> {
         let expr = match self.peek() {
-            Token::Int(n) => Expr::Int(*n),
-            // Todo Token::Ident
+            Token::Int(n) => Expr::Int(n.clone()),
+            Token::Ident(s) => Expr::Ident(s.into()),
             Token::LParen => {
                 self.advance();  // Move past the LParen "("
                 let expr = self.expression()?;
@@ -219,21 +219,21 @@ mod tests {
         assert_eq!(p.matches_type(Token::RSquirly), false);
 
         assert_eq!(p.matches_types(vec![Token::Int(0)]), true);
+        assert_eq!(p.matches_types(vec![Token::EndLine, Token::Colon, Token::Int(9999)]), true);
         assert_eq!(p.matches_types(vec![Token::LParen, Token::Let, Token::Function]), false);
         assert_eq!(p.matches_types(vec![Token::Equal]), false);
-        assert_eq!(p.matches_types(vec![Token::Equal, Token::EndLine, Token::Colon, Token::Int(9999)]), true);
     }
 
     #[test]
     fn simple() {
         assert_eq!(
-            Err("No tokens to evaluate".into()), Parser::new(vec![]).eval()
+            Err("No tokens to evaluate".into()), Parser::new(vec![]).parse()
         );
         assert_eq!(
-            Ok(Expr::Int(0)), Parser::new(vec![Token::Int(0)]).eval()
+            Ok(Expr::Int(0)), Parser::new(vec![Token::Int(0)]).parse()
         );
         assert_eq!(
-            Ok(Expr::Int(5)), Parser::new(vec![Token::Int(5)]).eval()
+            Ok(Expr::Int(5)), Parser::new(vec![Token::Int(5)]).parse()
         );
     }
 
@@ -350,7 +350,8 @@ mod tests {
                 }),
                 right: Box::new(Expr::Int(3))
             }),
-            Parser::new(vec![Token::Int(1), Token::Plus, Token::Int(2), Token::Plus, Token::Int(3)]).parse()
+            Parser::new(vec![Token::Int(1), Token::Plus, Token::Int(2),
+                             Token::Plus, Token::Int(3)]).parse()
         );
         assert_eq!(
             Ok(Expr::Dyadic {
@@ -360,7 +361,7 @@ mod tests {
                     left: Box::new(Expr::Dyadic {
                         operator: Operator::Plus,
                         left: Box::new(Expr::Int(1)),
-                        right: Box::new(Expr::Int(2))
+                        right: Box::new(Expr::Ident("two".into()))
                     }),
                     right: Box::new(Expr::Int(4))
                 }),
@@ -370,7 +371,7 @@ mod tests {
                 })
             }),
             Parser::new(vec![Token::Int(1), Token::Plus,
-                             Token::Int(2), Token::Minus,
+                             Token::Ident("two".into()), Token::Minus,
                              Token::Int(4), Token::Plus,
                              Token::Minus, Token::Int(8)]).parse()
         );
@@ -410,7 +411,8 @@ mod tests {
         };
         assert_eq!(
             Ok(&n_plus_n_minus_n),
-            Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256), Token::Minus, Token::Int(128)]).parse().as_ref()
+            Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256),
+                             Token::Minus, Token::Int(128)]).parse().as_ref()
         );
         let n_plus_n_slash_n = Expr::Dyadic {
             operator: Operator::Plus,
@@ -423,7 +425,8 @@ mod tests {
         };
         assert_eq!(
             Ok(&n_plus_n_slash_n),
-            Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256), Token::Slash, Token::Int(128)]).parse().as_ref()
+            Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256),
+                             Token::Slash, Token::Int(128)]).parse().as_ref()
         );
         // Parentheses precedence
         assert_eq!(
@@ -443,11 +446,12 @@ mod tests {
                 right: Box::new(Expr::Dyadic {
                     operator: Operator::Plus,
                     left: Box::new(Expr::Int(256)),
-                    right: Box::new(Expr::Int(128))
+                    right: Box::new(Expr::Ident("one_two_eight".into()))
                 }),
             }),
             Parser::new(vec![Token::Int(512), Token::Plus, Token::LParen,
-                             Token::Int(256), Token::Plus, Token::Int(128), Token::RParen]).parse()
+                             Token::Int(256), Token::Plus, Token::Ident("one_two_eight".into()),
+                             Token::RParen]).parse()
         );
     }
 

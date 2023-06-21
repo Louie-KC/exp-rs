@@ -9,6 +9,7 @@ pub enum Operator {
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     Int(i32),
+    Ident(String),
     Monadic {
         operator: Operator,
         operand: Box<Expr>
