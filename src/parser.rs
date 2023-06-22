@@ -7,10 +7,13 @@ use crate::ast::*;
  * Recursive Descent
  * 
  * rules:
+ *    program -> statement*
+ *  statement -> print | expression ";"
+ *      print -> "print(" expression ");"
  * expression -> term
  *       term -> factor ( ( "+" | "-" ) factor)*
  *     factor -> unary ( ( "*" | "/" ) unary)*
- *      unary -> atom | "-" unary
+ *      unary -> atom | "+" unary | "-" unary
  *       atom -> "(" expression ")" | Integer | Identifier
  */
 
@@ -24,8 +27,47 @@ impl Parser {
         Self { tokens: tokens, pos: 0 }
     }
 
-    pub fn parse(&mut self) -> Result<Expr, String> {
-        self.eval()
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, String> {
+        if !self.brackets_balanced() {
+            return Err("Inbalanced brackets".into())
+        }
+        if let Err(e) = self.illegal_token_seq_check() {
+            return Err(e);
+        }
+
+        let mut statements: Vec<Stmt> = Vec::new();
+
+        while *self.peek() != Token::EOF {
+            statements.push(self.statement());
+        }
+
+        Ok(statements)
+    }
+
+    fn statement(&mut self) -> Stmt {
+        match *self.peek() {
+            Token::Print => self.print_statement(),
+            _            => self.expression_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> Stmt {
+        self.advance();
+        let val = self.expression();
+        if *self.peek() != Token::EndLine {
+            panic!("print statement expected \";\" to end the statement");
+        }
+        self.advance();  // ;
+        Stmt::Print(val.unwrap())
+    }
+
+    fn expression_statement(&mut self) -> Stmt {
+        let expr = self.expression();
+        if *self.peek() != Token::EndLine {
+            panic!("expected \";\" to end statement");
+        }
+        self.advance();  // ;
+        Stmt::Expr(expr.unwrap())
     }
 
     fn eval_operator(&mut self) -> Result<Operator, String> {
@@ -116,21 +158,6 @@ impl Parser {
         self.pos += 1
     }
 
-    fn eval(&mut self) -> Result<Expr, String> {
-        match self.tokens.len() {
-            0 => Err("No tokens to evaluate".into()),
-            _ => {
-                if !self.brackets_balanced() {
-                    return Err("Inbalanced brackets".into())
-                }
-                match self.illegal_token_seq_check() {
-                    Err(e) => return Err(e),
-                    _              => self.expression()
-                }
-            }
-        }
-    }
-
     // Rule: expression -> term
     fn expression(&mut self) -> Result<Expr, String> {
         // println!("expression called");
@@ -153,7 +180,7 @@ impl Parser {
 
     // Rule: factor -> unary ( ( "*" | "/" ) unary)*
     fn factor(&mut self) -> Result<Expr, String> {
-        println!("factor called");
+        // println!("factor called");
         let mut expr = self.unary()?;
 
         // allowed tokens
@@ -166,16 +193,16 @@ impl Parser {
         Ok(expr)
     }
 
-    // Rule: unary -> atom | "-" unary
+    // Rule: unary -> atom | "+" unary | "-" unary
     fn unary(&mut self) -> Result<Expr, String> {
         // println!("unary called");
         if self.matches_type(Token::Plus) {
             self.advance();
-            return Ok(Expr::Monadic { operator: Operator::Plus, operand: Box::new(self.atom()?) })
+            return Ok(Expr::Monadic { operator: Operator::Plus, operand: Box::new(self.unary()?) })
         }
         if self.matches_type(Token::Minus) {
             self.advance();
-            return Ok(Expr::Monadic { operator: Operator::Minus, operand: Box::new(self.atom()?) })
+            return Ok(Expr::Monadic { operator: Operator::Minus, operand: Box::new(self.unary()?) })
         }
         self.atom()
     }
@@ -188,7 +215,6 @@ impl Parser {
             Token::LParen => {
                 self.advance();  // Move past the LParen "("
                 let expr = self.expression()?;
-
                 // Revisit: Is it still needed after parentheses balance checking?
                 // if self.pos >= self.tokens.len() || self.peek() != &Token::RParen {
                 //     return Err("Missing closing parenthesis".into())
@@ -226,14 +252,14 @@ mod tests {
 
     #[test]
     fn simple() {
+        // assert_eq!(
+        //     Err("No tokens to evaluate".into()), Parser::new(vec![]).parse()
+        // );
         assert_eq!(
-            Err("No tokens to evaluate".into()), Parser::new(vec![]).parse()
+            Ok(vec![Stmt::Expr(Expr::Int(0))]), Parser::new(vec![Token::Int(0), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
-            Ok(Expr::Int(0)), Parser::new(vec![Token::Int(0)]).parse()
-        );
-        assert_eq!(
-            Ok(Expr::Int(5)), Parser::new(vec![Token::Int(5)]).parse()
+            Ok(vec![Stmt::Expr(Expr::Int(5))]), Parser::new(vec![Token::Int(5), Token::EndLine, Token::EOF]).parse()
         );
     }
 
@@ -241,50 +267,50 @@ mod tests {
     fn bad_token_combo_error_check() {
         assert_eq!(
             Err("Two Int tokens in a row".into()),
-            Parser::new(vec![Token::Int(0), Token::Int(0)]).parse()
+            Parser::new(vec![Token::Int(0), Token::Int(0), Token::EOF]).parse()
         );
         assert_eq!(
             Err("Two Int tokens in a row".into()),
-            Parser::new(vec![Token::Int(0), Token::Plus, Token::Int(0), Token::Int(0)]).parse()
+            Parser::new(vec![Token::Int(0), Token::Plus, Token::Int(0), Token::Int(0), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Two Ident tokens in a row".into()),
-            Parser::new(vec![Token::Ident("one".into()), Token::Ident("two".into())]).parse()
+            Parser::new(vec![Token::Ident("one".into()), Token::Ident("two".into()), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Ident token immediately followed by Int token".into()),
-            Parser::new(vec![Token::Ident("one".into()), Token::Int(0)]).parse()
+            Parser::new(vec![Token::Ident("one".into()), Token::Int(0), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Ident token immediately followed by Int token".into()),
-            Parser::new(vec![Token::Ident("one".into()), Token::Int(0)]).parse()
+            Parser::new(vec![Token::Ident("one".into()), Token::Int(0), Token::EndLine, Token::EOF]).parse()
         );
     }
 
     #[test]
     fn bracket_balance() {
         assert_eq!(
-            Ok(Expr::Int(0)),
+            Ok(vec![Stmt::Expr(Expr::Int(0))]),
             Parser::new(vec![Token::LParen, Token::LParen, Token::LParen, Token::Int(0),
-                             Token::RParen, Token::RParen, Token::RParen]).parse()
+                             Token::RParen, Token::RParen, Token::RParen, Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
-            Parser::new(vec![Token::RParen]).parse()
+            Parser::new(vec![Token::RParen, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
-            Parser::new(vec![Token::LParen, Token::LParen, Token::RParen]).parse()
+            Parser::new(vec![Token::LParen, Token::LParen, Token::RParen, Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
             Parser::new(vec![Token::LParen, Token::RParen, Token::LParen,
-                             Token::Ident("a".into())]).parse()
+                             Token::Ident("a".into()), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
             Parser::new(vec![Token::LParen, Token::LParen, Token::LParen,
-                             Token::RParen, Token::RParen, Token::RParen, Token::RParen]).parse()
+                             Token::RParen, Token::RParen, Token::RParen, Token::RParen, Token::EndLine, Token::EOF]).parse()
         );
 
     }
@@ -292,56 +318,56 @@ mod tests {
     #[test]        
     fn simple_monadic() {
         assert_eq!(
-            Ok(Expr::Monadic {
+            Ok(vec![Stmt::Expr(Expr::Monadic {
                 operator: Operator::Plus,
                 operand: Box::new(Expr::Int(256))
-            }),
-            Parser::new(vec![Token::Plus, Token::Int(256)]).parse()
+            })]),
+            Parser::new(vec![Token::Plus, Token::Int(256), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
-            Ok(Expr::Monadic {
+            Ok(vec![Stmt::Expr(Expr::Monadic {
                 operator: Operator::Minus,
                 operand: Box::new(Expr::Int(15))
-            }),
-            Parser::new(vec![Token::Minus, Token::Int(15)]).parse()
+            })]),
+            Parser::new(vec![Token::Minus, Token::Int(15), Token::EndLine, Token::EOF]).parse()
         );
     }
 
     #[test]
     fn simple_dyadic() {
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Plus,
                 left: Box::new(Expr::Int(5)),
                 right: Box::new(Expr::Int(6))
-            }),
-            Parser::new(vec![Token::Int(5), Token::Plus, Token::Int(6)]).parse()
+            })]),
+            Parser::new(vec![Token::Int(5), Token::Plus, Token::Int(6), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Minus,
                 left: Box::new(Expr::Int(20)),
                 right: Box::new(Expr::Int(5))
-            }),
-            Parser::new(vec![Token::Int(20), Token::Minus, Token::Int(5)]).parse()
+            })]),
+            Parser::new(vec![Token::Int(20), Token::Minus, Token::Int(5), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Minus,
                 left: Box::new(Expr::Int(256)),
                 right: Box::new(Expr::Monadic {
                     operator: Operator::Minus,
                     operand: Box::new(Expr::Int(256))
                 })
-            }),
-            Parser::new(vec![Token::Int(256), Token::Minus, Token::Minus, Token::Int(256)]).parse()
+            })]),
+            Parser::new(vec![Token::Int(256), Token::Minus, Token::Minus, Token::Int(256), Token::EndLine, Token::EOF]).parse()
         );
     }
 
     #[test]
     fn multiple_dyadic() {
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Plus,
                 left: Box::new(Expr::Dyadic {
                     operator: Operator::Plus,
@@ -349,12 +375,12 @@ mod tests {
                     right: Box::new(Expr::Int(2))
                 }),
                 right: Box::new(Expr::Int(3))
-            }),
+            })]),
             Parser::new(vec![Token::Int(1), Token::Plus, Token::Int(2),
-                             Token::Plus, Token::Int(3)]).parse()
+                             Token::Plus, Token::Int(3), Token::EndLine, Token::EOF]).parse()
         );
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Plus,
                 left: Box::new(Expr::Dyadic {
                     operator: Operator::Minus,
@@ -369,15 +395,15 @@ mod tests {
                     operator: Operator::Minus,
                     operand: Box::new(Expr::Int(8))
                 })
-            }),
+            })]),
             Parser::new(vec![Token::Int(1), Token::Plus,
                              Token::Ident("two".into()), Token::Minus,
                              Token::Int(4), Token::Plus,
-                             Token::Minus, Token::Int(8)]).parse()
+                             Token::Minus, Token::Int(8), Token::EndLine, Token::EOF]).parse()
         );
 
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Plus,
                 left: Box::new(Expr::Dyadic {
                     operator: Operator::Plus,
@@ -391,16 +417,16 @@ mod tests {
                     operator: Operator::Minus,
                     operand: Box::new(Expr::Int(30))
                 })
-            }),
+            })]),
             Parser::new(vec![Token::Int(10), Token::Plus, Token::Minus, Token::Int(20),
-                             Token::Plus, Token::Minus, Token::Int(30)]).parse()
+                             Token::Plus, Token::Minus, Token::Int(30), Token::EndLine, Token::EOF]).parse()
         );
     }
 
     #[test]
     fn precedence() {
         // Operator precedence
-        let n_plus_n_minus_n = Expr::Dyadic {
+        let n_plus_n_minus_n = vec![Stmt::Expr(Expr::Dyadic {
             operator: Operator::Minus,
             left: Box::new(Expr::Dyadic {
                 operator: Operator::Plus,
@@ -408,13 +434,13 @@ mod tests {
                 right: Box::new(Expr::Int(256))
             }),
             right: Box::new(Expr::Int(128))
-        };
+        })];
         assert_eq!(
             Ok(&n_plus_n_minus_n),
             Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Minus, Token::Int(128)]).parse().as_ref()
+                             Token::Minus, Token::Int(128), Token::EndLine, Token::EOF]).parse().as_ref()
         );
-        let n_plus_n_slash_n = Expr::Dyadic {
+        let n_plus_n_slash_n = vec![Stmt::Expr(Expr::Dyadic {
             operator: Operator::Plus,
             left: Box::new(Expr::Int(512)),
             right: Box::new(Expr::Dyadic {
@@ -422,25 +448,25 @@ mod tests {
                 left: Box::new(Expr::Int(256)),
                 right: Box::new(Expr::Int(128))
             }),
-        };
+        })];
         assert_eq!(
             Ok(&n_plus_n_slash_n),
             Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Slash, Token::Int(128)]).parse().as_ref()
+                             Token::Slash, Token::Int(128), Token::EndLine, Token::EOF]).parse().as_ref()
         );
         // Parentheses precedence
         assert_eq!(
             Ok(&n_plus_n_minus_n),
             Parser::new(vec![Token::LParen, Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Minus, Token::Int(128), Token::RParen]).parse().as_ref()
+                             Token::Minus, Token::Int(128), Token::RParen, Token::EndLine, Token::EOF]).parse().as_ref()
         );
         assert_eq!(
             Ok(&n_plus_n_slash_n),
             Parser::new(vec![Token::LParen, Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Slash, Token::Int(128), Token::RParen]).parse().as_ref()
+                             Token::Slash, Token::Int(128), Token::RParen, Token::EndLine, Token::EOF]).parse().as_ref()
         );
         assert_eq!(
-            Ok(Expr::Dyadic {
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Plus,
                 left: Box::new(Expr::Int(512)),
                 right: Box::new(Expr::Dyadic {
@@ -448,14 +474,15 @@ mod tests {
                     left: Box::new(Expr::Int(256)),
                     right: Box::new(Expr::Ident("one_two_eight".into()))
                 }),
-            }),
+            })]),
+            // 512 + (256 + one_two_eight);
             Parser::new(vec![Token::Int(512), Token::Plus, Token::LParen,
                              Token::Int(256), Token::Plus, Token::Ident("one_two_eight".into()),
-                             Token::RParen]).parse()
+                             Token::RParen, Token::EndLine, Token::EOF]).parse()
         );
 
         assert_eq!(
-            Ok(Expr::Dyadic {  // 16 / 4 * -1
+            Ok(vec![Stmt::Expr(Expr::Dyadic {  // 16 / 4 * -1
                 operator: Operator::Star,
                 left: Box::new(Expr::Dyadic {
                     operator: Operator::Slash,
@@ -466,9 +493,9 @@ mod tests {
                     operator: Operator::Minus,
                     operand: Box::new(Expr::Int(1))
                 })
-            }),
+            })]),
             Parser::new(vec![Token::Int(16), Token::Slash, Token::Int(4),
-                             Token::Star, Token::Minus, Token::Int(1)]).parse()
+                             Token::Star, Token::Minus, Token::Int(1), Token::EndLine, Token::EOF]).parse()
         )
     }
 

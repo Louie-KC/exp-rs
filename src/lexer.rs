@@ -8,7 +8,7 @@ pub fn tokenise(source: String) -> Vec<Token> {
     while let Some(token) = next_token(&mut iter) {
         tokens.push(token);
     }
-
+    tokens.push(Token::EOF);
     tokens
 }
 
@@ -65,11 +65,13 @@ fn text_token(iter: &mut Chars, first: char) -> Option<Token> {
             break;
         }
     }
-    match word.as_str() {
-        "let" => Some(Token::Let),
-        "fn" => Some(Token::Function),
-        _ => Some(Token::Ident(word))
-    }
+    let token = match word.as_str() {
+        "print" => Token::Print,
+        "let" => Token::Let,
+        "fn" => Token::Function,
+        _ => Token::Ident(word)
+    };
+    Some(token)
 }
 
 #[cfg(test)]
@@ -79,17 +81,17 @@ mod tests {
 
     #[test]
     fn simple() {
-        assert_eq!(Vec::<Token>::new(), tokenise("".to_string()));
+        assert_eq!(vec![Token::EOF], tokenise("".to_string()));
         assert_eq!(
-            vec![Token::Int(12)],
+            vec![Token::Int(12), Token::EOF],
             tokenise(String::from("12"))
         );
         assert_eq!(
-            vec![Token::Minus, Token::Int(1024), Token::Plus, Token::Int(2)],
+            vec![Token::Minus, Token::Int(1024), Token::Plus, Token::Int(2), Token::EOF],
             tokenise(String::from("-1024 + 2"))
         );
         assert_eq!(
-            vec![Token::Minus, Token::Equal, Token::Plus],
+            vec![Token::Minus, Token::Equal, Token::Plus, Token::EOF],
             tokenise(String::from("-=+"))
         );
         assert_eq!(
@@ -102,6 +104,7 @@ mod tests {
                 Token::Plus,
                 Token::Plus,
                 Token::Plus,
+                Token::EOF
             ],
             tokenise(String::from("   -+--  -++    +"))
         );
@@ -110,16 +113,16 @@ mod tests {
     #[test]
     fn has_ident() {
         assert_eq!(
-            vec![Token::Ident("on_its_own".to_string())],
+            vec![Token::Ident("on_its_own".to_string()), Token::EOF],
             tokenise("on_its_own".to_string())
         );
         assert_eq!(
-            vec![Token::Ident("a".to_string()), Token::Equal, Token::Int(0)],
+            vec![Token::Ident("a".to_string()), Token::Equal, Token::Int(0), Token::EOF],
             tokenise("a = 0".to_string())
         );
         assert_eq!(
             vec![Token::Ident("a".to_string()), Token::Equal,
-                 Token::Minus, Token::Int(5), Token::Plus, Token::Minus, Token::Int(2)],
+                 Token::Minus, Token::Int(5), Token::Plus, Token::Minus, Token::Int(2), Token::EOF],
             tokenise("a = -5 + -2".to_string())
         );
     }
@@ -149,7 +152,7 @@ mod tests {
                 Token::Equal, Token::Ident("add".into()),
                 Token::LParen,
                     Token::Int(16), Token::Comma, Token::Int(8),
-                Token::RParen, Token::EndLine],
+                Token::RParen, Token::EndLine, Token::EOF],
             tokenise(input1.into())
         );
 
@@ -178,7 +181,7 @@ mod tests {
                 Token::Let, Token::Ident("oneAndHalf".into()), Token::Colon, Token::Ident("int".into()),
                 Token::Equal, Token::Ident("half".into()),
                 Token::LParen, Token::Ident("eight".into()), Token::RParen,
-                Token::Star, Token::Int(3), Token::EndLine],
+                Token::Star, Token::Int(3), Token::EndLine, Token::EOF],
             tokenise(input2.into())
         );
 
@@ -202,7 +205,7 @@ mod tests {
 
                 Token::Let, Token::Ident("result".into()), Token::Colon, Token::Ident("int".into()),
                 Token::Equal, Token::Ident("incr".into()),
-                Token::LParen, Token::Int(0), Token::RParen, Token::EndLine],
+                Token::LParen, Token::Int(0), Token::RParen, Token::EndLine, Token::EOF],
             tokenise(input3.into())
         );
     }

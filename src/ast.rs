@@ -1,4 +1,10 @@
 #[derive(Debug, PartialEq)]
+pub enum Stmt {
+    Expr(Expr),
+    Print(Expr)
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Operator {
     Plus,
     Minus,
@@ -18,5 +24,5 @@ pub enum Expr {
         operator: Operator,
         left: Box<Expr>,
         right: Box<Expr>
-    }
+    },
 }
