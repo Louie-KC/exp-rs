@@ -453,6 +453,23 @@ mod tests {
                              Token::Int(256), Token::Plus, Token::Ident("one_two_eight".into()),
                              Token::RParen]).parse()
         );
+
+        assert_eq!(
+            Ok(Expr::Dyadic {  // 16 / 4 * -1
+                operator: Operator::Star,
+                left: Box::new(Expr::Dyadic {
+                    operator: Operator::Slash,
+                    left: Box::new(Expr::Int(16)),
+                    right: Box::new(Expr::Int(4))
+                }),
+                right: Box::new(Expr::Monadic {
+                    operator: Operator::Minus,
+                    operand: Box::new(Expr::Int(1))
+                })
+            }),
+            Parser::new(vec![Token::Int(16), Token::Slash, Token::Int(4),
+                             Token::Star, Token::Minus, Token::Int(1)]).parse()
+        )
     }
 
 }
