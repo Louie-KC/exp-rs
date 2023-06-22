@@ -76,35 +76,27 @@ fn text_token(iter: &mut Chars, first: char) -> Option<Token> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tokens::*;
+    use crate::tokens::Token::*;
     use crate::lexer::tokenise;
 
     #[test]
     fn simple() {
-        assert_eq!(vec![Token::EOF], tokenise("".to_string()));
+        assert_eq!(vec![EOF], tokenise("".to_string()));
         assert_eq!(
-            vec![Token::Int(12), Token::EOF],
+            vec![Int(12), EOF],
             tokenise(String::from("12"))
         );
         assert_eq!(
-            vec![Token::Minus, Token::Int(1024), Token::Plus, Token::Int(2), Token::EOF],
+            vec![Minus, Int(1024), Plus, Int(2), EOF],
             tokenise(String::from("-1024 + 2"))
         );
         assert_eq!(
-            vec![Token::Minus, Token::Equal, Token::Plus, Token::EOF],
+            vec![Minus, Equal, Plus, EOF],
             tokenise(String::from("-=+"))
         );
         assert_eq!(
             vec![
-                Token::Minus,
-                Token::Plus,
-                Token::Minus,
-                Token::Minus,
-                Token::Minus,
-                Token::Plus,
-                Token::Plus,
-                Token::Plus,
-                Token::EOF
+                Minus, Plus, Minus, Minus, Minus, Plus, Plus, Plus, EOF
             ],
             tokenise(String::from("   -+--  -++    +"))
         );
@@ -113,16 +105,16 @@ mod tests {
     #[test]
     fn has_ident() {
         assert_eq!(
-            vec![Token::Ident("on_its_own".to_string()), Token::EOF],
+            vec![Ident("on_its_own".to_string()), EOF],
             tokenise("on_its_own".to_string())
         );
         assert_eq!(
-            vec![Token::Ident("a".to_string()), Token::Equal, Token::Int(0), Token::EOF],
+            vec![Ident("a".to_string()), Equal, Int(0), EOF],
             tokenise("a = 0".to_string())
         );
         assert_eq!(
-            vec![Token::Ident("a".to_string()), Token::Equal,
-                 Token::Minus, Token::Int(5), Token::Plus, Token::Minus, Token::Int(2), Token::EOF],
+            vec![Ident("a".to_string()), Equal,
+                 Minus, Int(5), Plus, Minus, Int(2), EOF],
             tokenise("a = -5 + -2".to_string())
         );
     }
@@ -138,21 +130,15 @@ mod tests {
         "#;
 
         assert_eq!(
-            vec![Token::Let, Token::Ident("add".into()), Token::Equal, Token::Function,
-                Token::LParen,
-                    Token::Ident("a".into()), Token::Colon, Token::Ident("int".into()),
-                    Token::Comma,
-                    Token::Ident("b".into()), Token::Colon, Token::Ident("int".into()),
-                Token::RParen, Token::Colon, Token::Ident("int".into()),
-                Token::LSquirly,
-                    Token::Ident("a".into()), Token::Plus, Token::Ident("b".into()),
-                Token::RSquirly, Token::EndLine,
+            vec![Let, Ident("add".into()), Equal, Function,
+                LParen,
+                    Ident("a".into()), Colon, Ident("int".into()), Comma,
+                    Ident("b".into()), Colon, Ident("int".into()),
+                RParen, Colon, Ident("int".into()),
+                LSquirly, Ident("a".into()), Plus, Ident("b".into()), RSquirly, EndLine,
 
-                Token::Let, Token::Ident("result".into()), Token::Colon, Token::Ident("int".into()),
-                Token::Equal, Token::Ident("add".into()),
-                Token::LParen,
-                    Token::Int(16), Token::Comma, Token::Int(8),
-                Token::RParen, Token::EndLine, Token::EOF],
+                Let, Ident("result".into()), Colon, Ident("int".into()),
+                Equal, Ident("add".into()), LParen, Int(16), Comma, Int(8), RParen, EndLine, EOF],
             tokenise(input1.into())
         );
 
@@ -167,21 +153,14 @@ mod tests {
         "#;
 
         assert_eq!(
-            vec![Token::Let, Token::Ident("half".into()), Token::Equal, Token::Function,
-                Token::LParen,
-                    Token::Ident("n".into()), Token::Colon, Token::Ident("int".into()),
-                Token::RParen, Token::Colon, Token::Ident("int".into()),
-                Token::LSquirly,
-                    Token::Ident("n".into()), Token::Slash, Token::Int(2),
-                Token::RSquirly, Token::EndLine,
+            vec![Let, Ident("half".into()), Equal, Function,
+                LParen, Ident("n".into()), Colon, Ident("int".into()), RParen, Colon,
+                Ident("int".into()), LSquirly, Ident("n".into()), Slash, Int(2), RSquirly, EndLine,
 
-                Token::Let, Token::Ident("eight".into()), Token::Colon, Token::Ident("int".into()),
-                Token::Equal, Token::Int(8), Token::EndLine,
+                Let, Ident("eight".into()), Colon, Ident("int".into()), Equal, Int(8), EndLine,
 
-                Token::Let, Token::Ident("oneAndHalf".into()), Token::Colon, Token::Ident("int".into()),
-                Token::Equal, Token::Ident("half".into()),
-                Token::LParen, Token::Ident("eight".into()), Token::RParen,
-                Token::Star, Token::Int(3), Token::EndLine, Token::EOF],
+                Let, Ident("oneAndHalf".into()), Colon, Ident("int".into()), Equal, Ident("half".into()),
+                LParen, Ident("eight".into()), RParen, Star, Int(3), EndLine, EOF],
             tokenise(input2.into())
         );
 
@@ -194,18 +173,12 @@ mod tests {
         "#;
 
         assert_eq!(
-            vec![Token::Let, Token::Ident("incr".into()), Token::Equal, Token::Function,
-                Token::LParen,
-                    Token::Ident("n".into()), Token::Colon, Token::Ident("int".into()),
-                Token::RParen, Token::Colon, Token::Ident("int".into()),
-                Token::LSquirly,
-                    Token::Ident("n".into()), Token::Plus, Token::Int(1), Token::EndLine,
-                    Token::Ident("n".into()),
-                Token::RSquirly, Token::EndLine,
+            vec![Let, Ident("incr".into()), Equal, Function,
+                LParen, Ident("n".into()), Colon, Ident("int".into()), RParen, Colon, Ident("int".into()),
+                LSquirly, Ident("n".into()), Plus, Int(1), EndLine, Ident("n".into()), RSquirly, EndLine,
 
-                Token::Let, Token::Ident("result".into()), Token::Colon, Token::Ident("int".into()),
-                Token::Equal, Token::Ident("incr".into()),
-                Token::LParen, Token::Int(0), Token::RParen, Token::EndLine, Token::EOF],
+                Let, Ident("result".into()), Colon, Ident("int".into()), Equal, Ident("incr".into()),
+                LParen, Int(0), RParen, EndLine, EOF],
             tokenise(input3.into())
         );
     }

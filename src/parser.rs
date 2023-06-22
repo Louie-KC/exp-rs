@@ -234,32 +234,29 @@ mod tests {
     use std::vec;
 
     use crate::parser::Parser;
-    use crate::tokens::Token;
+    use crate::tokens::Token as T;
     use crate::ast::*;
 
     #[test]
     fn token_type_check() {
-        let p = Parser::new(vec![Token::Int(5)]);
+        let p = Parser::new(vec![T::Int(5)]);
 
-        assert_eq!(p.matches_type(Token::Int(-9999)), true);
-        assert_eq!(p.matches_type(Token::RSquirly), false);
+        assert_eq!(p.matches_type(T::Int(-9999)), true);
+        assert_eq!(p.matches_type(T::RSquirly), false);
 
-        assert_eq!(p.matches_types(vec![Token::Int(0)]), true);
-        assert_eq!(p.matches_types(vec![Token::EndLine, Token::Colon, Token::Int(9999)]), true);
-        assert_eq!(p.matches_types(vec![Token::LParen, Token::Let, Token::Function]), false);
-        assert_eq!(p.matches_types(vec![Token::Equal]), false);
+        assert_eq!(p.matches_types(vec![T::Int(0)]), true);
+        assert_eq!(p.matches_types(vec![T::EndLine, T::Colon, T::Int(9999)]), true);
+        assert_eq!(p.matches_types(vec![T::LParen, T::Let, T::Function]), false);
+        assert_eq!(p.matches_types(vec![T::Equal]), false);
     }
 
     #[test]
     fn simple() {
-        // assert_eq!(
-        //     Err("No tokens to evaluate".into()), Parser::new(vec![]).parse()
-        // );
         assert_eq!(
-            Ok(vec![Stmt::Expr(Expr::Int(0))]), Parser::new(vec![Token::Int(0), Token::EndLine, Token::EOF]).parse()
+            Ok(vec![Stmt::Expr(Expr::Int(0))]), Parser::new(vec![T::Int(0), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
-            Ok(vec![Stmt::Expr(Expr::Int(5))]), Parser::new(vec![Token::Int(5), Token::EndLine, Token::EOF]).parse()
+            Ok(vec![Stmt::Expr(Expr::Int(5))]), Parser::new(vec![T::Int(5), T::EndLine, T::EOF]).parse()
         );
     }
 
@@ -267,23 +264,23 @@ mod tests {
     fn bad_token_combo_error_check() {
         assert_eq!(
             Err("Two Int tokens in a row".into()),
-            Parser::new(vec![Token::Int(0), Token::Int(0), Token::EOF]).parse()
+            Parser::new(vec![T::Int(0), T::Int(0), T::EOF]).parse()
         );
         assert_eq!(
             Err("Two Int tokens in a row".into()),
-            Parser::new(vec![Token::Int(0), Token::Plus, Token::Int(0), Token::Int(0), Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::Int(0), T::Plus, T::Int(0), T::Int(0), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Err("Two Ident tokens in a row".into()),
-            Parser::new(vec![Token::Ident("one".into()), Token::Ident("two".into()), Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::Ident("one".into()), T::Ident("two".into()), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Err("Ident token immediately followed by Int token".into()),
-            Parser::new(vec![Token::Ident("one".into()), Token::Int(0), Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::Ident("one".into()), T::Int(0), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Err("Ident token immediately followed by Int token".into()),
-            Parser::new(vec![Token::Ident("one".into()), Token::Int(0), Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::Ident("one".into()), T::Int(0), T::EndLine, T::EOF]).parse()
         );
     }
 
@@ -291,26 +288,26 @@ mod tests {
     fn bracket_balance() {
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Int(0))]),
-            Parser::new(vec![Token::LParen, Token::LParen, Token::LParen, Token::Int(0),
-                             Token::RParen, Token::RParen, Token::RParen, Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::LParen, T::LParen, T::LParen, T::Int(0),
+                             T::RParen, T::RParen, T::RParen, T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
-            Parser::new(vec![Token::RParen, Token::EOF]).parse()
+            Parser::new(vec![T::RParen, T::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
-            Parser::new(vec![Token::LParen, Token::LParen, Token::RParen, Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::LParen, T::LParen, T::RParen, T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
-            Parser::new(vec![Token::LParen, Token::RParen, Token::LParen,
-                             Token::Ident("a".into()), Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::LParen, T::RParen, T::LParen,
+                             T::Ident("a".into()), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Err("Inbalanced brackets".into()),
-            Parser::new(vec![Token::LParen, Token::LParen, Token::LParen,
-                             Token::RParen, Token::RParen, Token::RParen, Token::RParen, Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::LParen, T::LParen, T::LParen,
+                             T::RParen, T::RParen, T::RParen, T::RParen, T::EndLine, T::EOF]).parse()
         );
 
     }
@@ -322,14 +319,16 @@ mod tests {
                 operator: Operator::Plus,
                 operand: Box::new(Expr::Int(256))
             })]),
-            Parser::new(vec![Token::Plus, Token::Int(256), Token::EndLine, Token::EOF]).parse()
+            // +256;
+            Parser::new(vec![T::Plus, T::Int(256), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Monadic {
                 operator: Operator::Minus,
                 operand: Box::new(Expr::Int(15))
             })]),
-            Parser::new(vec![Token::Minus, Token::Int(15), Token::EndLine, Token::EOF]).parse()
+            // -15;
+            Parser::new(vec![T::Minus, T::Int(15), T::EndLine, T::EOF]).parse()
         );
     }
 
@@ -341,7 +340,8 @@ mod tests {
                 left: Box::new(Expr::Int(5)),
                 right: Box::new(Expr::Int(6))
             })]),
-            Parser::new(vec![Token::Int(5), Token::Plus, Token::Int(6), Token::EndLine, Token::EOF]).parse()
+            // 5 + 6;
+            Parser::new(vec![T::Int(5), T::Plus, T::Int(6), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Dyadic {
@@ -349,7 +349,8 @@ mod tests {
                 left: Box::new(Expr::Int(20)),
                 right: Box::new(Expr::Int(5))
             })]),
-            Parser::new(vec![Token::Int(20), Token::Minus, Token::Int(5), Token::EndLine, Token::EOF]).parse()
+            // 20 - 5;
+            Parser::new(vec![T::Int(20), T::Minus, T::Int(5), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Dyadic {
@@ -360,7 +361,8 @@ mod tests {
                     operand: Box::new(Expr::Int(256))
                 })
             })]),
-            Parser::new(vec![Token::Int(256), Token::Minus, Token::Minus, Token::Int(256), Token::EndLine, Token::EOF]).parse()
+            // 256 - -256;
+            Parser::new(vec![T::Int(256), T::Minus, T::Minus, T::Int(256), T::EndLine, T::EOF]).parse()
         );
     }
 
@@ -376,8 +378,9 @@ mod tests {
                 }),
                 right: Box::new(Expr::Int(3))
             })]),
-            Parser::new(vec![Token::Int(1), Token::Plus, Token::Int(2),
-                             Token::Plus, Token::Int(3), Token::EndLine, Token::EOF]).parse()
+            // 1 + 2 + 3;
+            Parser::new(vec![T::Int(1), T::Plus, T::Int(2),
+                             T::Plus, T::Int(3), T::EndLine, T::EOF]).parse()
         );
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Dyadic {
@@ -396,10 +399,9 @@ mod tests {
                     operand: Box::new(Expr::Int(8))
                 })
             })]),
-            Parser::new(vec![Token::Int(1), Token::Plus,
-                             Token::Ident("two".into()), Token::Minus,
-                             Token::Int(4), Token::Plus,
-                             Token::Minus, Token::Int(8), Token::EndLine, Token::EOF]).parse()
+            // 1 + two - 4 + -8;
+            Parser::new(vec![T::Int(1), T::Plus, T::Ident("two".into()), T::Minus, T::Int(4),
+                             T::Plus, T::Minus, T::Int(8), T::EndLine, T::EOF]).parse()
         );
 
         assert_eq!(
@@ -418,8 +420,9 @@ mod tests {
                     operand: Box::new(Expr::Int(30))
                 })
             })]),
-            Parser::new(vec![Token::Int(10), Token::Plus, Token::Minus, Token::Int(20),
-                             Token::Plus, Token::Minus, Token::Int(30), Token::EndLine, Token::EOF]).parse()
+            // 10 + -20 + -30;
+            Parser::new(vec![T::Int(10), T::Plus, T::Minus, T::Int(20),
+                             T::Plus, T::Minus, T::Int(30), T::EndLine, T::EOF]).parse()
         );
     }
 
@@ -437,8 +440,9 @@ mod tests {
         })];
         assert_eq!(
             Ok(&n_plus_n_minus_n),
-            Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Minus, Token::Int(128), Token::EndLine, Token::EOF]).parse().as_ref()
+            // 512 + 256 - 128;
+            Parser::new(vec![T::Int(512), T::Plus, T::Int(256),
+                             T::Minus, T::Int(128), T::EndLine, T::EOF]).parse().as_ref()
         );
         let n_plus_n_slash_n = vec![Stmt::Expr(Expr::Dyadic {
             operator: Operator::Plus,
@@ -451,19 +455,22 @@ mod tests {
         })];
         assert_eq!(
             Ok(&n_plus_n_slash_n),
-            Parser::new(vec![Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Slash, Token::Int(128), Token::EndLine, Token::EOF]).parse().as_ref()
+            // 512 + 256 / 128;
+            Parser::new(vec![T::Int(512), T::Plus, T::Int(256),
+                             T::Slash, T::Int(128), T::EndLine, T::EOF]).parse().as_ref()
         );
         // Parentheses precedence
         assert_eq!(
             Ok(&n_plus_n_minus_n),
-            Parser::new(vec![Token::LParen, Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Minus, Token::Int(128), Token::RParen, Token::EndLine, Token::EOF]).parse().as_ref()
+            // ( 512 + 256 - 128);
+            Parser::new(vec![T::LParen, T::Int(512), T::Plus, T::Int(256),
+                             T::Minus, T::Int(128), T::RParen, T::EndLine, T::EOF]).parse().as_ref()
         );
         assert_eq!(
             Ok(&n_plus_n_slash_n),
-            Parser::new(vec![Token::LParen, Token::Int(512), Token::Plus, Token::Int(256),
-                             Token::Slash, Token::Int(128), Token::RParen, Token::EndLine, Token::EOF]).parse().as_ref()
+            // ( 512 + 256 / 128 );
+            Parser::new(vec![T::LParen, T::Int(512), T::Plus, T::Int(256),
+                             T::Slash, T::Int(128), T::RParen, T::EndLine, T::EOF]).parse().as_ref()
         );
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Dyadic {
@@ -476,13 +483,13 @@ mod tests {
                 }),
             })]),
             // 512 + (256 + one_two_eight);
-            Parser::new(vec![Token::Int(512), Token::Plus, Token::LParen,
-                             Token::Int(256), Token::Plus, Token::Ident("one_two_eight".into()),
-                             Token::RParen, Token::EndLine, Token::EOF]).parse()
+            Parser::new(vec![T::Int(512), T::Plus, T::LParen,
+                             T::Int(256), T::Plus, T::Ident("one_two_eight".into()),
+                             T::RParen, T::EndLine, T::EOF]).parse()
         );
 
         assert_eq!(
-            Ok(vec![Stmt::Expr(Expr::Dyadic {  // 16 / 4 * -1
+            Ok(vec![Stmt::Expr(Expr::Dyadic {
                 operator: Operator::Star,
                 left: Box::new(Expr::Dyadic {
                     operator: Operator::Slash,
@@ -494,8 +501,9 @@ mod tests {
                     operand: Box::new(Expr::Int(1))
                 })
             })]),
-            Parser::new(vec![Token::Int(16), Token::Slash, Token::Int(4),
-                             Token::Star, Token::Minus, Token::Int(1), Token::EndLine, Token::EOF]).parse()
+            // 16 / 4 * -1;
+            Parser::new(vec![T::Int(16), T::Slash, T::Int(4),
+                             T::Star, T::Minus, T::Int(1), T::EndLine, T::EOF]).parse()
         )
     }
 
