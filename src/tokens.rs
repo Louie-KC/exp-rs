@@ -11,7 +11,7 @@ pub enum Token {
     Star,
     Slash,
     Equal,
-    Negate,
+    Negate,  // TODO
 
     // Comparator
     EqualTo,
@@ -25,6 +25,7 @@ pub enum Token {
     Function,
     Print,
     If,
+    Else,
 
     // Grouping
     Comma,

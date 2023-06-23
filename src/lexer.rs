@@ -86,6 +86,7 @@ fn text_token(iter: &mut Chars, first: char) -> Token {
         "let"   => Token::Let,
         "fn"    => Token::Function,
         "if"    => Token::If,
+        "else"  => Token::Else,
         "true"  => Token::Boolean(true),
         "false" => Token::Boolean(false),
         _       => Token::Ident(word)
@@ -143,6 +144,34 @@ mod tests {
                  Minus, Int(5), Plus, Minus, Int(2), EOF],
             tokenise("a = -5 + -2".to_string())
         );
+    }
+
+    #[test]
+    fn branch() {
+        let input1 = r#"
+            if (ab) {
+                1;
+            }
+            0;
+        "#.to_string();
+        assert_eq!(
+            vec![If, LParen, Ident("ab".into()), RParen, LSquirly, Int(1), EndLine, RSquirly,
+                 Int(0), EndLine, EOF],
+            tokenise(input1)
+        );
+
+        let input2 = r#"
+            if (a > 5) {
+                1;
+            } else {
+                2;
+            }
+        "#.to_string();
+        assert_eq!(
+            vec![If, LParen, Ident("a".into()), GreaterThan, Int(5), RParen,
+                    LSquirly, Int(1), EndLine, RSquirly,
+                Else, LSquirly, Int(2), EndLine, RSquirly, EOF],
+        tokenise(input2));
     }
 
     #[test]

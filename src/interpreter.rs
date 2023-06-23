@@ -33,10 +33,10 @@ impl Interpreter {
             Stmt::Expr(expr) => {
                 self.evalulate_expr(expr)?
             },
-            Stmt::If {cond, then} => {
+            Stmt::If {cond, then, els} => {
                 match self.evalulate_expr(cond).unwrap() {
                     0 => self.interpret_one(then).unwrap(),
-                    _ => 1
+                    _ => self.interpret_one(els).unwrap()
                 }
             }
             Stmt::Block(body) => {
@@ -138,5 +138,38 @@ mod tests {
         
         assert_eq!(Err("Undefined variable my_var".into()),
                    interpreter.interpret_one(&Stmt::Expr(Expr::Ident("my_var".into()))));
+    }
+
+    #[test]
+    fn branch() {
+        let mut interpreter = Interpreter::new();
+
+        // if (256 == 256) { 1; } else { 2; }
+        assert_eq!(1, interpreter.interpret(
+            &vec![
+                Stmt::If {
+                    cond: Expr::Dyadic {
+                        operator: Operator::EqualTo,
+                        left: Box::new(Expr::Int(256)),
+                        right: Box::new(Expr::Int(256))
+                    },
+                    then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
+                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                }]
+        ).unwrap());
+
+        // if (512 == 2048) { 1; } else { 2; }
+        assert_eq!(2, interpreter.interpret(
+            &vec![
+                Stmt::If {
+                    cond: Expr::Dyadic {
+                        operator: Operator::EqualTo,
+                        left: Box::new(Expr::Int(512)),
+                        right: Box::new(Expr::Int(2048))
+                    },
+                    then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
+                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                }]
+        ).unwrap());
     }
 }

@@ -13,7 +13,7 @@ use crate::ast::*;
  *               | block
  *               | expression ";"
  *      print -> "print(" expression ");"
- *         if -> "if(" expression ")" block
+ *         if -> "if(" expression ")" block ( else block )?
  *      block -> "{" statement* "}"
  * expression -> term ( "==" | "<" | "<=" | ">" | ">=" ) term
  *               | term
@@ -71,7 +71,7 @@ impl Parser {
         Stmt::Print(val.unwrap())
     }
 
-    // Rule: if -> "if(" expression ")" block
+    // Rule: if -> "if(" expression ")" block ( else block )?
     fn if_statement(&mut self) -> Stmt {
         self.advance();  // if
         if !self.matches_type(Token::LParen) {
@@ -83,7 +83,15 @@ impl Parser {
             panic!("expected \")\" after if condition). Found {:?}", *self.peek());
         }
         self.advance();  // RParen
-        Stmt::If{ cond: cond, then: Box::new(self.statement()) }
+        let then = self.statement();
+        println!("if_statement else check: {:?}", self.peek());
+        let els = if self.matches_type(Token::Else) {
+            self.advance();  // else
+            self.statement()
+        } else {
+            Stmt::Expr(Expr::Int(1))
+        };
+        Stmt::If{ cond: cond, then: Box::new(then), els: Box::new(els)}
     }
 
     // Rule: block -> "{" statement* "}"
@@ -568,7 +576,9 @@ mod tests {
     fn control_flow() {
         assert_eq!(
             // if (true) {}
-            Ok(vec![Stmt::If {cond: Expr::Boolean(true), then: Box::new(Stmt::Block(vec![]))} ]),
+            Ok(vec![Stmt::If {cond: Expr::Boolean(true),
+                              then: Box::new(Stmt::Block(vec![])),
+                              els: Box::new(Stmt::Expr(Expr::Int(1)))} ]),
             Parser::new(vec![T::If, T::LParen, T::Boolean(true), T::RParen,
                              T::LSquirly, T::RSquirly, T::EOF]).parse()
         );
@@ -578,14 +588,36 @@ mod tests {
                 cond: Expr::Dyadic {
                     operator: Operator::EqualTo,
                     left: Box::new(Expr::Ident("a".into())),
-                    right: Box::new(Expr::Ident("b".into()))
+                    right: Box::new(Expr::Int(8))
                 },
-                then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))]))}]),
+                then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
+                els: Box::new(Stmt::Expr(Expr::Int(1)))}]),
             Parser::new(vec![T::If, T::LParen, T::Ident("a".into()), T::EqualTo, T::Int(8), T::RParen,
                             T::LSquirly,
                                 T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
                             T::RSquirly, T::EOF]).parse()
-        )
+        );
+        assert_eq!(
+            // if (a == b) { print(0); } else { print(1); print(2); }
+            Ok(vec![Stmt::If{
+                cond: Expr::Dyadic {
+                    operator: Operator::EqualTo,
+                    left: Box::new(Expr::Ident("abc".into())),
+                    right: Box::new(Expr::Monadic {
+                        operator: Operator::Minus,
+                        operand: Box::new(Expr::Int(8))
+                    })
+                },
+                then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
+                els: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(1)), Stmt::Print(Expr::Int(2))]))}]),
+            Parser::new(vec![T::If, T::LParen, T::Ident("abc".into()), T::EqualTo, T::Minus, T::Int(8), T::RParen,
+                            T::LSquirly,
+                                T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
+                            T::RSquirly, T::Else, T::LSquirly,
+                                T::Print, T::LParen, T::Int(1), T::RParen, T::EndLine,
+                                T::Print, T::LParen, T::Int(2), T::RParen, T::EndLine,
+                            T::RSquirly, T::EOF]).parse()
+        );
     }
 
 }
