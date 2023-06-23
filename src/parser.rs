@@ -8,13 +8,19 @@ use crate::ast::*;
  * 
  * rules:
  *    program -> statement*
- *  statement -> print | expression ";"
+ *  statement -> print
+ *               | if
+ *               | block
+ *               | expression ";"
  *      print -> "print(" expression ");"
- * expression -> term
+ *         if -> "if(" expression ")" block
+ *      block -> "{" statement* "}"
+ * expression -> term ( "==" | "<" | "<=" | ">" | ">=" ) term
+ *               | term
  *       term -> factor ( ( "+" | "-" ) factor)*
  *     factor -> unary ( ( "*" | "/" ) unary)*
  *      unary -> atom | "+" unary | "-" unary
- *       atom -> "(" expression ")" | Integer | Identifier
+ *       atom -> "(" expression ")" | Integer | Identifier | Boolean
  */
 
 pub struct Parser {
@@ -47,35 +53,74 @@ impl Parser {
     fn statement(&mut self) -> Stmt {
         match *self.peek() {
             Token::Print => self.print_statement(),
+            Token::If    => self.if_statement(),
+            Token::LSquirly => self.block_statement(),
             _            => self.expression_statement()
         }
     }
 
+    // Rule: print -> "print(" expression ");"
     fn print_statement(&mut self) -> Stmt {
-        self.advance();
+        self.advance();  // Print
         let val = self.expression();
-        if *self.peek() != Token::EndLine {
+        if !self.matches_type(Token::EndLine) {
+
             panic!("print statement expected \";\" to end the statement");
         }
         self.advance();  // ;
         Stmt::Print(val.unwrap())
     }
 
+    // Rule: if -> "if(" expression ")" block
+    fn if_statement(&mut self) -> Stmt {
+        self.advance();  // if
+        if !self.matches_type(Token::LParen) {
+            panic!("Expected \"(\" after if");
+        }
+        self.advance();  // LParen
+        let cond: Expr = self.expression().unwrap();
+        if *self.peek() != Token::RParen {
+            panic!("expected \")\" after if condition). Found {:?}", *self.peek());
+        }
+        self.advance();  // RParen
+        Stmt::If{ cond: cond, then: Box::new(self.statement()) }
+    }
+
+    // Rule: block -> "{" statement* "}"
+    fn block_statement(&mut self) -> Stmt {
+        self.advance();  // {
+        let mut peek = self.tokens.get(self.pos).unwrap();
+        let mut statements:Vec<Stmt> = Vec::new();
+        while *peek != Token::EOF && *peek != Token::RSquirly {
+            statements.push(self.statement());
+            peek = self.tokens.get(self.pos).unwrap();
+        }
+        // let body = self.statement();
+        if !self.matches_type(Token::RSquirly) {
+            panic!("block expected \"}}\"");
+        }
+        self.advance();  // }
+        Stmt::Block(statements)
+    }
+
+    // Rule: expression -> comparator | term
     fn expression_statement(&mut self) -> Stmt {
-        let expr = self.expression();
-        if *self.peek() != Token::EndLine {
+        let expr: Result<Expr, String> = self.expression();
+        if !self.matches_type(Token::EndLine) {
+            // println!("expr_statement panicking on {:?}", *self.peek());
             panic!("expected \";\" to end statement");
         }
         self.advance();  // ;
         Stmt::Expr(expr.unwrap())
     }
-
+    
     fn eval_operator(&mut self) -> Result<Operator, String> {
         let op = match self.tokens.get(self.pos) {
-            Some(Token::Plus) => Operator::Plus,
-            Some(Token::Minus) => Operator::Minus,
-            Some(Token::Star) => Operator::Star,
-            Some(Token::Slash) => Operator::Slash,
+            Some(Token::Plus)    => Operator::Plus,
+            Some(Token::Minus)   => Operator::Minus,
+            Some(Token::Star)    => Operator::Star,
+            Some(Token::Slash)   => Operator::Slash,
+            Some(Token::EqualTo) => Operator::EqualTo,
             _ => return Err("Invalid operator".into())
         };
         Ok(op)
@@ -146,7 +191,7 @@ impl Parser {
                 Token::LParen => stack.push(Token::LParen),
                 Token::LSquirly => stack.push(Token::LSquirly),
                 Token::RParen if stack.pop() != Some(Token::LParen) => return false,
-                // Token::RSquirly if stack.pop() != Some(Token::LSquirly) => return false,
+                Token::RSquirly if stack.pop() != Some(Token::LSquirly) => return false,
                 _ => {}
             }
         }
@@ -161,7 +206,18 @@ impl Parser {
     // Rule: expression -> term
     fn expression(&mut self) -> Result<Expr, String> {
         // println!("expression called");
-        self.term()
+        let mut expr = self.term().unwrap();
+
+        if self.matches_types(vec![Token::Negate, Token::EqualTo]) {  // Todo: < <= > >=
+            let op = self.eval_operator()?;
+            self.advance();
+            expr = Expr::Dyadic {
+                operator: op,
+                left: Box::new(expr),
+                right: Box::new(self.term().unwrap())
+            };
+        }
+        Ok(expr)
     }
 
     // Rule: term -> factor ( ( "+" | "-" ) factor)*
@@ -207,11 +263,12 @@ impl Parser {
         self.atom()
     }
 
-    // Rule: atom -> "(" expression ")" | Integer | Identifier
+    // Rule: atom -> "(" expression ")" | Integer | Identifier | Boolean
     fn atom(&mut self) -> Result<Expr, String> {
         let expr = match self.peek() {
             Token::Int(n) => Expr::Int(n.clone()),
             Token::Ident(s) => Expr::Ident(s.into()),
+            Token::Boolean(b) => Expr::Boolean(b.clone()),
             Token::LParen => {
                 self.advance();  // Move past the LParen "("
                 let expr = self.expression()?;
@@ -504,6 +561,30 @@ mod tests {
             // 16 / 4 * -1;
             Parser::new(vec![T::Int(16), T::Slash, T::Int(4),
                              T::Star, T::Minus, T::Int(1), T::EndLine, T::EOF]).parse()
+        )
+    }
+
+    #[test]
+    fn control_flow() {
+        assert_eq!(
+            // if (true) {}
+            Ok(vec![Stmt::If {cond: Expr::Boolean(true), then: Box::new(Stmt::Block(vec![]))} ]),
+            Parser::new(vec![T::If, T::LParen, T::Boolean(true), T::RParen,
+                             T::LSquirly, T::RSquirly, T::EOF]).parse()
+        );
+        assert_eq!(
+            // if (a == b) { print(0); }
+            Ok(vec![Stmt::If{
+                cond: Expr::Dyadic {
+                    operator: Operator::EqualTo,
+                    left: Box::new(Expr::Ident("a".into())),
+                    right: Box::new(Expr::Ident("b".into()))
+                },
+                then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))]))}]),
+            Parser::new(vec![T::If, T::LParen, T::Ident("a".into()), T::EqualTo, T::Int(8), T::RParen,
+                            T::LSquirly,
+                                T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
+                            T::RSquirly, T::EOF]).parse()
         )
     }
 

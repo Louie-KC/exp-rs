@@ -23,7 +23,7 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         '-' => Token::Minus,
         '*' => Token::Star,
         '/' => Token::Slash,
-        '=' => Token::Equal,
+        '!' => Token::Negate,
         '(' => Token::LParen,
         ')' => Token::RParen,
         '{' => Token::LSquirly,
@@ -31,16 +31,32 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         ';' => Token::EndLine,
         ':' => Token::Colon,
         ',' => Token::Comma,
-        '0'..='9' => number_token(iter, first)?,
+        '=' | '<' | '>' => equals_comparator_token(iter, first),
+        '0'..='9' => number_token(iter, first),
         'a'..='z' |
-        'A'..='Z' => text_token(iter, first)?,
+        'A'..='Z' => text_token(iter, first),
         _ => return None
     };
     Some(token)
 }
 
-fn number_token(iter: &mut Chars, first: char) -> Option<Token> {
-    let mut number = first.to_digit(10)? as i32;
+fn equals_comparator_token(iter: &mut Chars, first: char) -> Token {
+    let next = iter.clone().next().unwrap_or(' ');
+    if next == '=' {
+        iter.next();
+    }
+    match (first, next) {
+        ('<', '=') => Token::LessEquals,
+        ('<', _)   => Token::LessThan,
+        ('>', '=') => Token::GreaterEquals,
+        ('>', _)   => Token::GreaterThan,
+        ('=', '=') => Token::EqualTo,
+        (_, _)     => Token::Equal
+    }
+}
+
+fn number_token(iter: &mut Chars, first: char) -> Token {
+    let mut number = first.to_digit(10).unwrap() as i32;
 
     while let Some(next_char) = iter.clone().next() {
         if let Some(digit) = next_char.to_digit(10) {
@@ -51,10 +67,10 @@ fn number_token(iter: &mut Chars, first: char) -> Option<Token> {
         }
     }
 
-    Some(Token::Int(number))
+    Token::Int(number)
 }
 
-fn text_token(iter: &mut Chars, first: char) -> Option<Token> {
+fn text_token(iter: &mut Chars, first: char) -> Token {
     // first char will be alphabetic per `next_token` implementation
     let mut word: String = String::from(first);
     while let Some(next_char) = iter.clone().next() {
@@ -65,13 +81,15 @@ fn text_token(iter: &mut Chars, first: char) -> Option<Token> {
             break;
         }
     }
-    let token = match word.as_str() {
+    match word.as_str() {
         "print" => Token::Print,
-        "let" => Token::Let,
-        "fn" => Token::Function,
-        _ => Token::Ident(word)
-    };
-    Some(token)
+        "let"   => Token::Let,
+        "fn"    => Token::Function,
+        "if"    => Token::If,
+        "true"  => Token::Boolean(true),
+        "false" => Token::Boolean(false),
+        _       => Token::Ident(word)
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +117,14 @@ mod tests {
                 Minus, Plus, Minus, Minus, Minus, Plus, Plus, Plus, EOF
             ],
             tokenise(String::from("   -+--  -++    +"))
+        );
+        assert_eq!(
+            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, EOF],
+            tokenise("== = < <= > >=".into())
+        );
+        assert_eq!(
+            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, EOF],
+            tokenise("===<<=>>=".into())
         );
     }
 

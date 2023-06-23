@@ -12,7 +12,16 @@ fn main() {
     // let source = String::from("1 + -2 + 3 + 4");
     // let source = String::from("1 * 2 * 4");
     // let source = String::from("1 + 2 + 4 + 5;");
-    let source = String::from("3 + 5; print(1 + 2); 2 - 1;");
+    // let source = String::from("3 + 5; print(1 + 2); 2 - 1;");
+    let source = r#"
+        print(6);
+        if (5 == 5) {
+            print(5);
+            print(50);
+        }
+        if (true) {}
+        print(4);
+        "#.to_string();
     let tokens = lexer::tokenise(source);
     for token in &tokens {
         println!("{:?}", token);
@@ -21,6 +30,6 @@ fn main() {
     println!("{:?}", &parsed);
 
     let mut interpreter = Interpreter::new();
-    let result = interpreter.interpret(parsed);
+    let result = interpreter.interpret(&parsed);
     println!("Interpret result: {}", result.unwrap());
 }

@@ -1,8 +1,9 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     // Literal
     Int(i32),
     Ident(String),
+    Boolean(bool),
 
     // Operator
     Plus,
@@ -10,11 +11,20 @@ pub enum Token {
     Star,
     Slash,
     Equal,
+    Negate,
+
+    // Comparator
+    EqualTo,
+    LessThan,
+    LessEquals,
+    GreaterThan,
+    GreaterEquals,
 
     // Keyword
     Let,
     Function,
     Print,
+    If,
 
     // Grouping
     Comma,
