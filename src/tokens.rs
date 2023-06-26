@@ -21,6 +21,7 @@ pub enum Token {
     GreaterEquals,
 
     // Keyword
+    Var,
     Let,
     Function,
     Print,

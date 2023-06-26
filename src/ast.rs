@@ -1,17 +1,17 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     Expr(Expr),
     Print(Expr),
-    // If(Expr, Box<Stmt>),
     If{
         cond: Expr,
         then: Box<Stmt>,
         els: Box<Stmt>  // IntExp(1) if no else stmt specified
     },
     Block(Vec<Stmt>),
+    Var(Expr, Option<Box<Stmt>>)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Operator {
     Plus,
     Minus,
@@ -21,7 +21,7 @@ pub enum Operator {
     EqualTo,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Int(i32),
     Ident(String),

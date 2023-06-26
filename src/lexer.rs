@@ -84,6 +84,7 @@ fn text_token(iter: &mut Chars, first: char) -> Token {
     match word.as_str() {
         "print" => Token::Print,
         "let"   => Token::Let,
+        "var"   => Token::Var,
         "fn"    => Token::Function,
         "if"    => Token::If,
         "else"  => Token::Else,
@@ -132,17 +133,17 @@ mod tests {
     #[test]
     fn has_ident() {
         assert_eq!(
-            vec![Ident("on_its_own".to_string()), EOF],
-            tokenise("on_its_own".to_string())
+            vec![Ident("on_its_own".to_string()), EndLine, EOF],
+            tokenise("on_its_own;".to_string())
         );
         assert_eq!(
-            vec![Ident("a".to_string()), Equal, Int(0), EOF],
-            tokenise("a = 0".to_string())
+            vec![Ident("a".to_string()), Equal, Int(0), EndLine, EOF],
+            tokenise("a = 0;".to_string())
         );
         assert_eq!(
-            vec![Ident("a".to_string()), Equal,
-                 Minus, Int(5), Plus, Minus, Int(2), EOF],
-            tokenise("a = -5 + -2".to_string())
+            vec![Var, Ident("a".to_string()), Equal,
+                 Minus, Int(5), Plus, Minus, Int(2), EndLine, EOF],
+            tokenise("var a = -5 + -2;".to_string())
         );
     }
 

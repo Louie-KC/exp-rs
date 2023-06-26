@@ -9,12 +9,14 @@ use crate::ast::*;
  * rules:
  *    program -> statement*
  *  statement -> print
+ *               | varDecl
  *               | if
  *               | block
  *               | expression ";"
  *      print -> "print(" expression ");"
+ *    varDecl -> "var" Identifier ( "=" statement )? ";"
  *         if -> "if(" expression ")" block ( else block )?
- *      block -> "{" statement* "}"
+ *      block -> "{" statement* "}"\
  * expression -> term ( "==" | "<" | "<=" | ">" | ">=" ) term
  *               | term
  *       term -> factor ( ( "+" | "-" ) factor)*
@@ -44,6 +46,7 @@ impl Parser {
         let mut statements: Vec<Stmt> = Vec::new();
 
         while *self.peek() != Token::EOF {
+            // println!("parse: {:?}", self.peek());
             statements.push(self.statement());
         }
 
@@ -51,8 +54,10 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Stmt {
+        println!("statement: {:?}", self.peek());
         match *self.peek() {
             Token::Print => self.print_statement(),
+            Token::Var   => self.var_declaration(),
             Token::If    => self.if_statement(),
             Token::LSquirly => self.block_statement(),
             _            => self.expression_statement()
@@ -69,6 +74,36 @@ impl Parser {
         }
         self.advance();  // ;
         Stmt::Print(val.unwrap())
+    }
+
+    // Rule: varDecl -> "var" Identifier ( "=" statement )? ";"
+    fn var_declaration(&mut self) -> Stmt {
+        self.advance();  // var
+        if !self.matches_type(Token::Ident("".into())) {
+            panic!("Expected identifier after \"var\"");
+        }
+        let ident = self.expression();
+        // println!("pre-advance for value: {:?}", self.peek());
+        // self.advance();
+        let value = match self.peek() {
+            Token::Equal => {
+                self.advance();
+                let deterministic = self.matches_type(Token::If);
+                let v = self.statement();
+                match (deterministic, self.matches_type(Token::EndLine)) {
+                    (true, true)  => self.advance(),
+                    (true, false) => panic!("Expected ; after var declaration"),
+                    (_, _)        => {}
+                };
+                Some(Box::new(v))
+            },
+            Token::EndLine => {
+                self.advance();
+                None
+            }
+            _ => panic!("var declaration: bad value")
+        };
+        Stmt::Var(ident.unwrap(), value)
     }
 
     // Rule: if -> "if(" expression ")" block ( else block )?
@@ -617,6 +652,49 @@ mod tests {
                                 T::Print, T::LParen, T::Int(1), T::RParen, T::EndLine,
                                 T::Print, T::LParen, T::Int(2), T::RParen, T::EndLine,
                             T::RSquirly, T::EOF]).parse()
+        );
+    }
+
+    #[test]
+    fn variables() {
+        assert_eq!(
+            // var abcdefg;
+            Ok(vec![Stmt::Var(Expr::Ident("abcdefg".into()), None)]),
+            Parser::new(vec![T::Var, T::Ident("abcdefg".into()), T::EndLine, T::EOF]).parse()
+        );
+        assert_eq!(
+            // var abc = 6;
+            Ok(vec![Stmt::Var(Expr::Ident("abc".into()),
+                            Some(Box::new(Stmt::Expr(Expr::Int(6)))))]),
+            Parser::new(vec![T::Var, T::Ident("abc".into()), T::Equal,
+                             T::Int(6), T::EndLine, T::EOF]).parse()
+        );
+        assert_eq!(
+            // var abc = 3 + 2;
+            Ok(vec![Stmt::Var(Expr::Ident("abc".into()),
+                            Some(Box::new(Stmt::Expr(Expr::Dyadic {
+                                                        operator: Operator::Plus,
+                                                        left: Box::new(Expr::Int(3)),
+                                                        right: Box::new(Expr::Int(2))
+                                                    }))))]),
+            Parser::new(vec![T::Var, T::Ident("abc".into()), T::Equal, T::Int(3),
+                             T::Plus, T::Int(2), T::EndLine, T::EOF]).parse()
+        );
+        assert_eq!(
+            // var b = if (false) { 0; } else { a; };
+            Ok(vec![Stmt::Var(Expr::Ident("b".into()),
+                            Some(Box::new(Stmt::If {
+                                cond: Expr::Boolean(false),
+                                then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(0))])),
+                                els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Ident("a".into()))]))
+                            })))]),
+            Parser::new(vec![T::Var, T::Ident("b".into()), T::Equal,
+                             T::If,
+                                T::LParen, T::Boolean(false), T::RParen,
+                                T::LSquirly, T::Int(0), T::EndLine, T::RSquirly,
+                             T::Else,
+                                T::LSquirly, T::Ident("a".into()), T::EndLine, T::RSquirly,
+                             T::EndLine, T::EOF]).parse()
         );
     }
 
