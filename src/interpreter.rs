@@ -94,7 +94,20 @@ impl Interpreter {
                     Operator::LessEquals    => if lhs <= rhs {0} else {1},
                     Operator::GreaterThan   => if lhs >  rhs {0} else {1},
                     Operator::GreaterEquals => if lhs >= rhs {0} else {1},
+                    Operator::LogicalAnd
+                    | Operator::LogicalOr   => panic!("Logical operation in Dyadic expression")
                 }
+            },
+            Expr::Logical { operator, left, right } => {
+                let lhs = self.evalulate_expr(left)?;
+                match (lhs, operator) {  // short circuit eval
+                    (1, Operator::LogicalAnd)  => lhs,
+                    (0, Operator::LogicalOr)   => lhs,
+                    (_, Operator::LogicalAnd)
+                    | (_, Operator::LogicalOr) => self.evalulate_expr(right)?,
+                    _ => panic!("Non-logical operator in Logical expression")
+                }
+
             }
         };
         Ok(result)
@@ -231,4 +244,10 @@ mod tests {
                 ]
         ).unwrap());
     }
+
+    // #[test]  // TODO
+    // fn short_circuit_eval() {
+    //     let mut interpreter = Interpreter::new();
+    //     // true || { };
+    // }
 }

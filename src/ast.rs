@@ -23,6 +23,8 @@ pub enum Operator {
     LessEquals,
     GreaterThan,
     GreaterEquals,
+    LogicalOr,
+    LogicalAnd,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -39,4 +41,9 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>
     },
+    Logical {
+        operator: Operator,
+        left: Box<Expr>,
+        right: Box<Expr>
+    }
 }

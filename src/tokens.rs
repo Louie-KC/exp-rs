@@ -12,6 +12,8 @@ pub enum Token {
     Slash,
     Equal,
     Negate,  // TODO
+    Or,
+    And,
 
     // Comparator
     EqualTo,

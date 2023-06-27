@@ -31,6 +31,7 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         ';' => Token::EndLine,
         ':' => Token::Colon,
         ',' => Token::Comma,
+        '|' | '&' => logical_operator(iter, first),
         '=' | '<' | '>' => equals_comparator_token(iter, first),
         '0'..='9' => number_token(iter, first),
         'a'..='z' |
@@ -38,6 +39,16 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         _ => return None
     };
     Some(token)
+}
+
+fn logical_operator(iter: &mut Chars, first: char) -> Token {
+    let op = match (first, iter.clone().next()) {
+        ('&', Some('&')) => Token::And,
+        ('|', Some('|')) => Token::Or,
+        _ => panic!("Missing second {} in logical operator", first)
+    };
+    iter.next();
+    op
 }
 
 fn equals_comparator_token(iter: &mut Chars, first: char) -> Token {
@@ -128,6 +139,10 @@ mod tests {
             vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, EOF],
             tokenise("===<<=>>=".into())
         );
+        assert_eq!(
+            vec![Or, And, EOF],
+            tokenise("|| &&".into())
+        )
     }
 
     #[test]

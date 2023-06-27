@@ -18,10 +18,12 @@ use crate::ast::*;
  *         if -> "if(" expression ")" block ( else block )?
  *      block -> "{" statement* "}"
  * 
- * expression -> term ( "==" | "<" | "<=" | ">" | ">=" ) term
- *               | term
- *       term -> factor ( ( "+" | "-" ) factor)*
- *     factor -> unary ( ( "*" | "/" ) unary)*
+ * expression -> logic_or
+ *   logic_or -> logic_and ( "||" logic_and )*
+ *  logic_and -> comparator ( "&&" comparator )*
+ * comparator -> term ( ("==" | "<" | "<=" | ">" | ">=" ) term )*
+ *       term -> factor ( ( "+" | "-" ) factor)*   // OR goes here
+ *     factor -> unary ( ( "*" | "/" ) unary)*   // AND goes here
  *      unary -> atom | "+" unary | "-" unary
  *       atom -> "(" expression ")" | Integer | Identifier | Boolean
  */
@@ -166,6 +168,8 @@ impl Parser {
             Some(Token::LessEquals)    => Operator::LessEquals,
             Some(Token::GreaterThan)   => Operator::GreaterThan,
             Some(Token::GreaterEquals) => Operator::GreaterEquals,
+            Some(Token::Or)      => Operator::LogicalOr,
+            Some(Token::And)     => Operator::LogicalAnd,
             _ => return Err("Invalid operator".into())
         };
         Ok(op)
@@ -249,21 +253,63 @@ impl Parser {
     }
 
     // Rule: expression -> term | term ( "==" | "<" | "<=" | ">" | ">=" ) term
+
+
+    // Rule: expression -> logic_or ( ("==" | "<" | "<=" | ">" | ">=" ) logic_or )*
     fn expression(&mut self) -> Result<Expr, String> {
         // println!("expression called");
-        let mut expr = self.term().unwrap();
-        // println!("expression: {:?}", self.peek());
-        if let Ok(op) = self.eval_operator() {
-            self.advance();
-            expr = Expr::Dyadic {
-                operator: op,
-                left: Box::new(expr),
-                right: Box::new(self.term().unwrap())
-            }
-        };
+        let expr = self.logic_or().unwrap();
         Ok(expr)
     }
 
+    // Rule: logic_or -> logic_and ( "||" logic_and )*
+    fn logic_or(&mut self) -> Result<Expr, String> {
+        let mut expr = self.logic_and()?;
+
+        if self.matches_type(Token::Or) {
+            let op = self.eval_operator();
+            self.advance();  // ||
+            // println!("Logical Or right: {:?}", self.peek());
+            let right = self.logic_and()?;
+            expr = Expr::Logical { operator: op.unwrap(), left: Box::new(expr), right: Box::new(right) };
+            // println!("Logical or expr: {:?}", expr);
+        }
+    
+        Ok(expr)
+    }
+
+    // Rule: logic_and -> term ( "&&" term )*
+    fn logic_and(&mut self) -> Result<Expr, String> {
+        let mut expr = self.comparator()?;
+        if self.matches_type(Token::And) {
+            let op = self.eval_operator();
+            self.advance();
+            let right = self.comparator()?;
+            expr = Expr::Logical { operator: op.unwrap(), left: Box::new(expr), right: Box::new(right) }
+        }
+        Ok(expr)
+    }
+
+    fn comparator(&mut self) -> Result<Expr, String> {
+        let mut expr = self.term()?;
+
+        let is_comparator = self.matches_types(vec![Token::EqualTo, Token::LessThan,
+                                    Token::LessEquals, Token::GreaterThan, Token::GreaterEquals]);
+        
+        if is_comparator {
+            if let Ok(op) = self.eval_operator() {
+                self.advance();
+                expr = Expr::Dyadic {
+                    operator: op,
+                    left: Box::new(expr),
+                    right: Box::new(self.term().unwrap())
+                }
+            }
+        }
+
+        Ok(expr)
+    }
+    
     // Rule: term -> factor ( ( "+" | "-" ) factor)*
     fn term(&mut self) -> Result<Expr, String> {
         // println!("term called");
@@ -653,6 +699,62 @@ mod tests {
                                 T::Print, T::LParen, T::Int(2), T::RParen, T::EndLine,
                             T::RSquirly, T::EOF]).parse()
         );
+        assert_eq!(
+            // if (false || true) {}
+            Ok(vec![Stmt::If {
+                cond: Expr::Logical {
+                    operator: Operator::LogicalOr,
+                    left: Box::new(Expr::Boolean(false)),
+                    right: Box::new(Expr::Boolean(true))
+                },
+                then: Box::new(Stmt::Block(vec![])),
+                els: Box::new(Stmt::Expr(Expr::Int(1)))
+            }]),
+            Parser::new(vec![T::If, T::LParen, T::Boolean(false), T::Or, T::Boolean(true), T::RParen,
+                    T::LSquirly, T::RSquirly, T::EOF]).parse()
+        );
+        assert_eq!(
+            // if (0 <= a && a <= 4) {}
+            Ok(vec![Stmt::If {
+                cond: Expr::Logical {
+                    operator: Operator::LogicalAnd,
+                    left: Box::new(Expr::Dyadic {
+                        operator: Operator::LessEquals,
+                        left: Box::new(Expr::Int(0)),
+                        right: Box::new(Expr::Ident("a".into()))
+                    }),
+                    right: Box::new(Expr::Dyadic {
+                        operator: Operator::LessEquals,
+                        left: Box::new(Expr::Ident("a".into())),
+                        right: Box::new(Expr::Int(4))
+                    })
+                },
+                then: Box::new(Stmt::Block(vec![])),
+                els: Box::new(Stmt::Expr(Expr::Int(1)))
+            }]),
+            Parser::new(vec![T::If, T::LParen,
+                                T::Int(0), T::LessEquals, T::Ident("a".into()), T::And,
+                                T::Ident("a".into()), T::LessEquals, T::Int(4), T::RParen,
+                    T::LSquirly, T::RSquirly, T::EOF]).parse()
+        );
+        // if (true || true && true) {}  // Logical And has higher precedence over Logical Or
+        assert_eq!(
+            Ok(vec![Stmt::If {
+                cond: Expr::Logical {
+                    operator: Operator::LogicalOr,
+                    left: Box::new(Expr::Boolean(true)),
+                    right: Box::new(Expr::Logical {
+                        operator: Operator::LogicalAnd,
+                        left: Box::new(Expr::Boolean(true)),
+                        right: Box::new(Expr::Boolean(true))
+                    })
+                },
+                then: Box::new(Stmt::Block(vec![])),
+                els: Box::new(Stmt::Expr(Expr::Int(1)))
+            }]),
+            Parser::new(vec![T::If, T::LParen, T::Boolean(true), T::Or, T::Boolean(true), T::And,
+                             T::Boolean(true), T::RParen, T::LSquirly, T::RSquirly, T::EOF]).parse()
+        )
     }
 
     #[test]
