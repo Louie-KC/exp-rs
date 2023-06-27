@@ -19,6 +19,10 @@ pub enum Operator {
     Slash,
     // Assign,
     EqualTo,
+    LessThan,
+    LessEquals,
+    GreaterThan,
+    GreaterEquals,
 }
 
 #[derive(Debug, PartialEq, Clone)]

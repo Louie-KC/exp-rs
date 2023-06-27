@@ -53,6 +53,7 @@ impl Interpreter {
                 };
 
                 self.variables.insert(name.into(), val);
+                // println!("variables after insert/update: {:?}", self.variables);
                 0
             },
         };
@@ -65,18 +66,10 @@ impl Interpreter {
             Expr::Boolean(true)  => 0,
             Expr::Boolean(false) => 1,
             Expr::Ident(s) => {
-                // Removing map from interpreter then resetting.
-                // Avoids immutable AND mutable borrow of 'self' in a single scope
-                // Revisit: feels improper
-                let vars = std::mem::take(&mut self.variables);
-                let result = match vars.get(s) {
-                    // Some(expr) => self.evalulate_expr(expr)?,
-                    Some(stmt) => self.interpret_one(stmt)?,
+                match self.retrieve_ident(s) {
+                    Some(stmt) => self.interpret_one(&stmt).unwrap(),
                     None => return Err(format!("Undefined variable {}", s))
-                };
-                self.variables = vars;  // reset/restore variable map
-
-                result
+                }
             },
             Expr::Monadic { operator, operand } => {
                 let next = self.evalulate_expr(operand)?;
@@ -96,11 +89,19 @@ impl Interpreter {
                     Operator::Minus   => lhs - rhs,
                     Operator::Star    => lhs * rhs,
                     Operator::Slash   => lhs / rhs,
-                    Operator::EqualTo => if lhs == rhs {0} else {1},
+                    Operator::EqualTo       => if lhs == rhs {0} else {1},
+                    Operator::LessThan      => if lhs <  rhs {0} else {1},
+                    Operator::LessEquals    => if lhs <= rhs {0} else {1},
+                    Operator::GreaterThan   => if lhs >  rhs {0} else {1},
+                    Operator::GreaterEquals => if lhs >= rhs {0} else {1},
                 }
             }
         };
         Ok(result)
+    }
+
+    fn retrieve_ident(&mut self, name: &String) -> Option<Box<Stmt>> {
+        self.variables.get(name).cloned()
     }
 }
 
@@ -207,6 +208,27 @@ mod tests {
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
                 }]
+        ).unwrap());
+        
+        // var a = 5;
+        // var b = 50;
+        // var max = if (a > b) { a; } else { b; };
+        // max;
+        assert_eq!(50, interpreter.interpret(
+            &vec![
+                Stmt::Var(Expr::Ident("a".into()), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
+                Stmt::Var(Expr::Ident("b".into()), Some(Box::new(Stmt::Expr(Expr::Int(50))))),
+                Stmt::Var(Expr::Ident("max".into()), Some(Box::new(Stmt::If {
+                    cond: Expr::Dyadic {
+                        operator: Operator::GreaterThan,
+                        left: Box::new(Expr::Ident("a".into())),
+                        right: Box::new(Expr::Ident("b".into()))
+                    },
+                    then: Box::new(Stmt::Expr(Expr::Ident("a".into()))),
+                    els: Box::new(Stmt::Expr(Expr::Ident("b".into())))
+                }))),
+                Stmt::Expr(Expr::Ident("max".into()))
+                ]
         ).unwrap());
     }
 }

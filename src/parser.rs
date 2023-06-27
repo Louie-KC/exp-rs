@@ -9,14 +9,15 @@ use crate::ast::*;
  * rules:
  *    program -> statement*
  *  statement -> print
- *               | varDecl
+ *               | var
  *               | if
  *               | block
  *               | expression ";"
  *      print -> "print(" expression ");"
- *    varDecl -> "var" Identifier ( "=" statement )? ";"
+ *        var -> "var" Identifier ( "=" statement )? ";"
  *         if -> "if(" expression ")" block ( else block )?
- *      block -> "{" statement* "}"\
+ *      block -> "{" statement* "}"
+ * 
  * expression -> term ( "==" | "<" | "<=" | ">" | ">=" ) term
  *               | term
  *       term -> factor ( ( "+" | "-" ) factor)*
@@ -54,10 +55,10 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Stmt {
-        println!("statement: {:?}", self.peek());
+        // println!("statement: {:?}", self.peek());
         match *self.peek() {
             Token::Print => self.print_statement(),
-            Token::Var   => self.var_declaration(),
+            Token::Var   => self.var_statement(),
             Token::If    => self.if_statement(),
             Token::LSquirly => self.block_statement(),
             _            => self.expression_statement()
@@ -76,15 +77,13 @@ impl Parser {
         Stmt::Print(val.unwrap())
     }
 
-    // Rule: varDecl -> "var" Identifier ( "=" statement )? ";"
-    fn var_declaration(&mut self) -> Stmt {
+    // Rule: var -> "var" Identifier ( "=" statement )? ";"
+    fn var_statement(&mut self) -> Stmt {
         self.advance();  // var
         if !self.matches_type(Token::Ident("".into())) {
             panic!("Expected identifier after \"var\"");
         }
         let ident = self.expression();
-        // println!("pre-advance for value: {:?}", self.peek());
-        // self.advance();
         let value = match self.peek() {
             Token::Equal => {
                 self.advance();
@@ -119,7 +118,6 @@ impl Parser {
         }
         self.advance();  // RParen
         let then = self.statement();
-        println!("if_statement else check: {:?}", self.peek());
         let els = if self.matches_type(Token::Else) {
             self.advance();  // else
             self.statement()
@@ -164,6 +162,10 @@ impl Parser {
             Some(Token::Star)    => Operator::Star,
             Some(Token::Slash)   => Operator::Slash,
             Some(Token::EqualTo) => Operator::EqualTo,
+            Some(Token::LessThan)      => Operator::LessThan,
+            Some(Token::LessEquals)    => Operator::LessEquals,
+            Some(Token::GreaterThan)   => Operator::GreaterThan,
+            Some(Token::GreaterEquals) => Operator::GreaterEquals,
             _ => return Err("Invalid operator".into())
         };
         Ok(op)
@@ -246,20 +248,19 @@ impl Parser {
         self.pos += 1
     }
 
-    // Rule: expression -> term
+    // Rule: expression -> term | term ( "==" | "<" | "<=" | ">" | ">=" ) term
     fn expression(&mut self) -> Result<Expr, String> {
         // println!("expression called");
         let mut expr = self.term().unwrap();
-
-        if self.matches_types(vec![Token::Negate, Token::EqualTo]) {  // Todo: < <= > >=
-            let op = self.eval_operator()?;
+        // println!("expression: {:?}", self.peek());
+        if let Ok(op) = self.eval_operator() {
             self.advance();
             expr = Expr::Dyadic {
                 operator: op,
                 left: Box::new(expr),
                 right: Box::new(self.term().unwrap())
-            };
-        }
+            }
+        };
         Ok(expr)
     }
 
@@ -281,7 +282,6 @@ impl Parser {
     fn factor(&mut self) -> Result<Expr, String> {
         // println!("factor called");
         let mut expr = self.unary()?;
-
         // allowed tokens
         while self.matches_types(vec![Token::Star, Token::Slash]) {
             let op = self.eval_operator()?;
@@ -633,10 +633,10 @@ mod tests {
                             T::RSquirly, T::EOF]).parse()
         );
         assert_eq!(
-            // if (a == b) { print(0); } else { print(1); print(2); }
+            // if (a < b) { print(0); } else { print(1); print(2); }
             Ok(vec![Stmt::If{
                 cond: Expr::Dyadic {
-                    operator: Operator::EqualTo,
+                    operator: Operator::LessThan,
                     left: Box::new(Expr::Ident("abc".into())),
                     right: Box::new(Expr::Monadic {
                         operator: Operator::Minus,
@@ -645,7 +645,7 @@ mod tests {
                 },
                 then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
                 els: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(1)), Stmt::Print(Expr::Int(2))]))}]),
-            Parser::new(vec![T::If, T::LParen, T::Ident("abc".into()), T::EqualTo, T::Minus, T::Int(8), T::RParen,
+            Parser::new(vec![T::If, T::LParen, T::Ident("abc".into()), T::LessThan, T::Minus, T::Int(8), T::RParen,
                             T::LSquirly,
                                 T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
                             T::RSquirly, T::Else, T::LSquirly,
