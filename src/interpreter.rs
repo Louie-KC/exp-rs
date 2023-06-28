@@ -222,6 +222,20 @@ mod tests {
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
                 }]
         ).unwrap());
+
+        // if (512 == 2048) { 11; }  // Default output of 0 without any statements
+        assert_eq!(0, interpreter.interpret(
+            &vec![
+                Stmt::If {
+                    cond: Expr::Dyadic {
+                        operator: Operator::EqualTo,
+                        left: Box::new(Expr::Int(512)),
+                        right: Box::new(Expr::Int(2048))
+                    },
+                    then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(11))])),
+                    els: Box::new(Stmt::Block(vec![]))
+                }]
+        ).unwrap());
         
         // var a = 5;
         // var b = 50;

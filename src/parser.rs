@@ -124,7 +124,7 @@ impl Parser {
             self.advance();  // else
             self.statement()
         } else {
-            Stmt::Expr(Expr::Int(1))
+            Stmt::Block(vec![])
         };
         Stmt::If{ cond: cond, then: Box::new(then), els: Box::new(els)}
     }
@@ -251,9 +251,6 @@ impl Parser {
     fn advance(&mut self) -> () {
         self.pos += 1
     }
-
-    // Rule: expression -> term | term ( "==" | "<" | "<=" | ">" | ">=" ) term
-
 
     // Rule: expression -> logic_or ( ("==" | "<" | "<=" | ">" | ">=" ) logic_or )*
     fn expression(&mut self) -> Result<Expr, String> {
@@ -659,7 +656,7 @@ mod tests {
             // if (true) {}
             Ok(vec![Stmt::If {cond: Expr::Boolean(true),
                               then: Box::new(Stmt::Block(vec![])),
-                              els: Box::new(Stmt::Expr(Expr::Int(1)))} ]),
+                              els: Box::new(Stmt::Block(vec![]))} ]),
             Parser::new(vec![T::If, T::LParen, T::Boolean(true), T::RParen,
                              T::LSquirly, T::RSquirly, T::EOF]).parse()
         );
@@ -672,7 +669,7 @@ mod tests {
                     right: Box::new(Expr::Int(8))
                 },
                 then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
-                els: Box::new(Stmt::Expr(Expr::Int(1)))}]),
+                els: Box::new(Stmt::Block(vec![]))}]),
             Parser::new(vec![T::If, T::LParen, T::Ident("a".into()), T::EqualTo, T::Int(8), T::RParen,
                             T::LSquirly,
                                 T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
@@ -708,7 +705,7 @@ mod tests {
                     right: Box::new(Expr::Boolean(true))
                 },
                 then: Box::new(Stmt::Block(vec![])),
-                els: Box::new(Stmt::Expr(Expr::Int(1)))
+                els: Box::new(Stmt::Block(vec![]))
             }]),
             Parser::new(vec![T::If, T::LParen, T::Boolean(false), T::Or, T::Boolean(true), T::RParen,
                     T::LSquirly, T::RSquirly, T::EOF]).parse()
@@ -730,7 +727,7 @@ mod tests {
                     })
                 },
                 then: Box::new(Stmt::Block(vec![])),
-                els: Box::new(Stmt::Expr(Expr::Int(1)))
+                els: Box::new(Stmt::Block(vec![]))
             }]),
             Parser::new(vec![T::If, T::LParen,
                                 T::Int(0), T::LessEquals, T::Ident("a".into()), T::And,
@@ -750,7 +747,7 @@ mod tests {
                     })
                 },
                 then: Box::new(Stmt::Block(vec![])),
-                els: Box::new(Stmt::Expr(Expr::Int(1)))
+                els: Box::new(Stmt::Block(vec![]))
             }]),
             Parser::new(vec![T::If, T::LParen, T::Boolean(true), T::Or, T::Boolean(true), T::And,
                              T::Boolean(true), T::RParen, T::LSquirly, T::RSquirly, T::EOF]).parse()

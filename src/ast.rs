@@ -5,7 +5,7 @@ pub enum Stmt {
     If{
         cond: Expr,
         then: Box<Stmt>,
-        els: Box<Stmt>  // IntExp(1) if no else stmt specified
+        els: Box<Stmt>
     },
     Block(Vec<Stmt>),
     Var(Expr, Option<Box<Stmt>>)
