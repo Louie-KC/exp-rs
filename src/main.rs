@@ -15,7 +15,7 @@ fn main() {
     // let source = String::from("3 + 5; print(1 + 2); 2 - 1;");
     let source = r#"
         print(6);
-        if (true || false) {
+        if (true) {  // eeeeeeeeeeeee
             print(5);
             print(50);
         } else {

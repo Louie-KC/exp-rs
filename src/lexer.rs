@@ -16,8 +16,14 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
     let mut first = iter.next()?;
     while first.eq(&' ') || first.eq(&'\n') {
         first = iter.next()?;
+        println!("char: {}, {}", first, first as u32);
+    }
+    while is_comment(&first, iter) {
+        println!("comment found");
+        first = char_after_skipping_comment(iter);
     }
 
+    println!("char pre-match: {}, {}", first, first as u32);
     let token = match first {
         '+' => Token::Plus,
         '-' => Token::Minus,
@@ -39,6 +45,29 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         _ => return None
     };
     Some(token)
+}
+
+fn is_comment(first: &char, iter: &mut Chars) -> bool {
+    // lookahead one
+    match (first, iter.clone().next().unwrap_or(' ')) {
+        ('/', '/') => true,
+        _ => false
+    }
+}
+
+fn char_after_skipping_comment(iter: &mut Chars) -> char {
+    let mut result = iter.next().unwrap();
+    while !result.is_control() {
+        result = iter.next().unwrap();
+    }
+    result = iter.next().unwrap();
+    while result.is_whitespace(){
+        println!("whitespace");
+        result = iter.next().unwrap_or(3 as char);
+    }
+    println!("char after skipping comment: {}", result);
+    result
+
 }
 
 fn logical_operator(iter: &mut Chars, first: char) -> Token {
@@ -252,5 +281,26 @@ mod tests {
                 LParen, Int(0), RParen, EndLine, EOF],
             tokenise(input3.into())
         );
+    }
+
+    #[test]
+    fn comments() {
+        let input1 = r#"
+        // All Comments
+        // No actual code
+        // :)
+        "#;
+        assert_eq!(vec![EOF], tokenise(input1.into()));
+
+        let input2 = r#"
+        // e
+        print(5);  // prints 5
+        // in between statements
+        print(6);  // then prints 6
+        // should be EOF here
+        "#;
+        assert_eq!(vec![Print, LParen, Int(5), RParen, EndLine,
+                        Print, LParen, Int(6), RParen, EndLine,
+                        EOF], tokenise(input2.into()))
     }
 }
