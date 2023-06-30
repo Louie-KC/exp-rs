@@ -16,19 +16,17 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
     let mut first = iter.next()?;
     while first.eq(&' ') || first.eq(&'\n') {
         first = iter.next()?;
-        println!("char: {}, {}", first, first as u32);
     }
     while is_comment(&first, iter) {
-        println!("comment found");
         first = char_after_skipping_comment(iter);
     }
 
-    println!("char pre-match: {}, {}", first, first as u32);
     let token = match first {
         '+' => Token::Plus,
         '-' => Token::Minus,
         '*' => Token::Star,
         '/' => Token::Slash,
+        '%' => Token::Percent,
         '!' => Token::Negate,
         '(' => Token::LParen,
         ')' => Token::RParen,
@@ -62,10 +60,8 @@ fn char_after_skipping_comment(iter: &mut Chars) -> char {
     }
     result = iter.next().unwrap();
     while result.is_whitespace(){
-        println!("whitespace");
         result = iter.next().unwrap_or(3 as char);
     }
-    println!("char after skipping comment: {}", result);
     result
 
 }
@@ -151,8 +147,8 @@ mod tests {
             tokenise(String::from("-1024 + 2"))
         );
         assert_eq!(
-            vec![Minus, Equal, Plus, EOF],
-            tokenise(String::from("-=+"))
+            vec![Equal, Minus, Plus, Slash, Percent, EOF],
+            tokenise(String::from("=-+/%"))
         );
         assert_eq!(
             vec![
@@ -161,12 +157,12 @@ mod tests {
             tokenise(String::from("   -+--  -++    +"))
         );
         assert_eq!(
-            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, EOF],
-            tokenise("== = < <= > >=".into())
+            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, Negate, Equal, EOF],
+            tokenise("== = < <= > >= !=".into())
         );
         assert_eq!(
-            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, EOF],
-            tokenise("===<<=>>=".into())
+            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, Negate, Equal, EOF],
+            tokenise("===<<=>>=!=".into())
         );
         assert_eq!(
             vec![Or, And, EOF],

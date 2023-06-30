@@ -89,13 +89,15 @@ impl Interpreter {
                     Operator::Minus   => lhs - rhs,
                     Operator::Star    => lhs * rhs,
                     Operator::Slash   => lhs / rhs,
+                    Operator::Modulo  => lhs % rhs,
                     Operator::EqualTo       => if lhs == rhs {0} else {1},
+                    Operator::NotEqualTo    => if lhs != rhs {0} else {1},
                     Operator::LessThan      => if lhs <  rhs {0} else {1},
                     Operator::LessEquals    => if lhs <= rhs {0} else {1},
                     Operator::GreaterThan   => if lhs >  rhs {0} else {1},
                     Operator::GreaterEquals => if lhs >= rhs {0} else {1},
                     Operator::LogicalAnd
-                    | Operator::LogicalOr   => panic!("Logical operation in Dyadic expression")
+                    | Operator::LogicalOr   => panic!("Logical operation in Dyadic expression"),
                 }
             },
             Expr::Logical { operator, left, right } => {
@@ -209,14 +211,14 @@ mod tests {
                 }]
         ).unwrap());
 
-        // if (512 == 2048) { 1; } else { 2; }
+        // if (512 != 512) { 1; } else { 2; }
         assert_eq!(2, interpreter.interpret(
             &vec![
                 Stmt::If {
                     cond: Expr::Dyadic {
-                        operator: Operator::EqualTo,
+                        operator: Operator::NotEqualTo,
                         left: Box::new(Expr::Int(512)),
-                        right: Box::new(Expr::Int(2048))
+                        right: Box::new(Expr::Int(512))
                     },
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))

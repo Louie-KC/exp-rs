@@ -21,9 +21,9 @@ use crate::ast::*;
  * expression -> logic_or
  *   logic_or -> logic_and ( "||" logic_and )*
  *  logic_and -> comparator ( "&&" comparator )*
- * comparator -> term ( ("==" | "<" | "<=" | ">" | ">=" ) term )*
- *       term -> factor ( ( "+" | "-" ) factor)*   // OR goes here
- *     factor -> unary ( ( "*" | "/" ) unary)*   // AND goes here
+ * comparator -> term ( ("==" | "!=" | "<" | "<=" | ">" | ">=" ) term )*
+ *       term -> factor ( ( "+" | "-" ) factor)*
+ *     factor -> unary ( ( "*" | "/" | "%" ) unary)*
  *      unary -> atom | "+" unary | "-" unary
  *       atom -> "(" expression ")" | Integer | Identifier | Boolean
  */
@@ -158,18 +158,28 @@ impl Parser {
     }
     
     fn eval_operator(&mut self) -> Result<Operator, String> {
-        let op = match self.tokens.get(self.pos) {
-            Some(Token::Plus)    => Operator::Plus,
-            Some(Token::Minus)   => Operator::Minus,
-            Some(Token::Star)    => Operator::Star,
-            Some(Token::Slash)   => Operator::Slash,
-            Some(Token::EqualTo) => Operator::EqualTo,
-            Some(Token::LessThan)      => Operator::LessThan,
-            Some(Token::LessEquals)    => Operator::LessEquals,
-            Some(Token::GreaterThan)   => Operator::GreaterThan,
-            Some(Token::GreaterEquals) => Operator::GreaterEquals,
-            Some(Token::Or)      => Operator::LogicalOr,
-            Some(Token::And)     => Operator::LogicalAnd,
+        let op = match self.peek() {
+            Token::Plus    => Operator::Plus,
+            Token::Minus   => Operator::Minus,
+            Token::Star    => Operator::Star,
+            Token::Slash   => Operator::Slash,
+            Token::Percent => Operator::Modulo,
+            Token::EqualTo => Operator::EqualTo,
+            Token::Negate  => {
+                match self.peek_ahead() {
+                    Some(Token::Equal) => {
+                        self.advance();
+                        Operator::NotEqualTo
+                    },
+                    _ => todo!("negation of variables")
+                }
+            },
+            Token::LessThan      => Operator::LessThan,
+            Token::LessEquals    => Operator::LessEquals,
+            Token::GreaterThan   => Operator::GreaterThan,
+            Token::GreaterEquals => Operator::GreaterEquals,
+            Token::Or      => Operator::LogicalOr,
+            Token::And     => Operator::LogicalAnd,
             _ => return Err("Invalid operator".into())
         };
         Ok(op)
@@ -177,6 +187,10 @@ impl Parser {
 
     fn peek(&self) -> &Token {
         &self.tokens.get(self.pos).unwrap()
+    }
+
+    fn peek_ahead(&self) -> Option<&Token> {
+        self.tokens.get(self.pos + 1)
     }
 
     fn matches_type(&self, check: Token) -> bool {
@@ -290,10 +304,10 @@ impl Parser {
     fn comparator(&mut self) -> Result<Expr, String> {
         let mut expr = self.term()?;
 
-        let is_comparator = self.matches_types(vec![Token::EqualTo, Token::LessThan,
-                                    Token::LessEquals, Token::GreaterThan, Token::GreaterEquals]);
+        let comparators = vec![Token::EqualTo, Token::Negate, Token::LessThan,
+                                           Token::LessEquals, Token::GreaterThan, Token::GreaterEquals];
         
-        if is_comparator {
+        if self.matches_types(comparators) {
             if let Ok(op) = self.eval_operator() {
                 self.advance();
                 expr = Expr::Dyadic {
@@ -321,12 +335,12 @@ impl Parser {
         Ok(expr)
     }
 
-    // Rule: factor -> unary ( ( "*" | "/" ) unary)*
+    // Rule: factor -> unary ( ( "*" | "/" | "%" ) unary)*
     fn factor(&mut self) -> Result<Expr, String> {
         // println!("factor called");
         let mut expr = self.unary()?;
         // allowed tokens
-        while self.matches_types(vec![Token::Star, Token::Slash]) {
+        while self.matches_types(vec![Token::Star, Token::Slash, Token::Percent]) {
             let op = self.eval_operator()?;
             self.advance();
             let right = self.unary()?;
@@ -661,7 +675,7 @@ mod tests {
                              T::LSquirly, T::RSquirly, T::EOF]).parse()
         );
         assert_eq!(
-            // if (a == b) { print(0); }
+            // if (a == 8) { print(0); }
             Ok(vec![Stmt::If{
                 cond: Expr::Dyadic {
                     operator: Operator::EqualTo,
@@ -671,6 +685,21 @@ mod tests {
                 then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
                 els: Box::new(Stmt::Block(vec![]))}]),
             Parser::new(vec![T::If, T::LParen, T::Ident("a".into()), T::EqualTo, T::Int(8), T::RParen,
+                            T::LSquirly,
+                                T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
+                            T::RSquirly, T::EOF]).parse()
+        );
+        assert_eq!(
+            // if (a != 8) { print(0); }
+            Ok(vec![Stmt::If{
+                cond: Expr::Dyadic {
+                    operator: Operator::NotEqualTo,
+                    left: Box::new(Expr::Ident("a".into())),
+                    right: Box::new(Expr::Int(8))
+                },
+                then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
+                els: Box::new(Stmt::Block(vec![]))}]),
+            Parser::new(vec![T::If, T::LParen, T::Ident("a".into()), T::Negate, T::Equal, T::Int(8), T::RParen,
                             T::LSquirly,
                                 T::Print, T::LParen, T::Int(0), T::RParen, T::EndLine,
                             T::RSquirly, T::EOF]).parse()

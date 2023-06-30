@@ -10,8 +10,9 @@ pub enum Token {
     Minus,
     Star,
     Slash,
+    Percent,
     Equal,
-    Negate,  // TODO
+    Negate,
     Or,
     And,
 
