@@ -47,5 +47,9 @@ pub enum Expr {
         operator: Operator,
         left: Box<Expr>,
         right: Box<Expr>
-    }
+    },
+    Assign {
+        var_name: String,
+        new_value: Box<Expr>
+    },
 }

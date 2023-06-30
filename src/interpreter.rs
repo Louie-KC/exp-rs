@@ -56,6 +56,7 @@ impl Interpreter {
     }
                  
     fn evalulate_expr(&mut self, expr: &Expr) -> Result<i32, String> {
+        // println!("evaluate_expr: {:?}", expr);
         let result: i32 = match expr {
             Expr::Int(n)   => *n,
             Expr::Boolean(true)  => 0,
@@ -106,6 +107,14 @@ impl Interpreter {
                 }
 
             }
+            Expr::Assign { var_name, new_value } => {
+                let val = self.evalulate_expr(new_value)?;
+                match self.variables.contains_key(var_name) {
+                    true  => self.variables.insert(var_name.into(), Box::new(Stmt::Expr(Expr::Int(val)))),
+                    false => panic!("Cannot assign to {} as it is not declared", var_name),
+                };
+                val
+            },
         };
         Ok(result)
     }
@@ -185,6 +194,24 @@ mod tests {
                 els: Box::new(Stmt::Expr(Expr::Int(1023)))
             }))),
             Stmt::Expr(Expr::Ident("b".into()))
+        ]).unwrap());
+
+        // var a = 10;
+        // var b = 20;
+        // a = a + b;
+        // a;
+        assert_eq!(30, interpreter.interpret(&vec![
+            Stmt::VarDecl("a".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
+            Stmt::VarDecl("b".into(), Some(Box::new(Stmt::Expr(Expr::Int(20))))),
+            Stmt::Expr(Expr::Assign {
+                var_name: "a".into(),
+                new_value: Box::new(Expr::Dyadic {
+                    operator: Operator::Plus,
+                    left: Box::new(Expr::Ident("a".into())),
+                    right: Box::new(Expr::Ident("b".into()))
+                })
+            }),
+            Stmt::Expr(Expr::Ident("a".into()))
         ]).unwrap());
     }
 

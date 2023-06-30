@@ -18,7 +18,8 @@ use crate::ast::*;
  *         if -> "if(" expression ")" block ( else block )?
  *      block -> "{" statement* "}"
  * 
- * expression -> logic_or
+ * expression -> assignment
+ * assignment -> logic_or | Identifier "=" expression
  *   logic_or -> logic_and ( "||" logic_and )*
  *  logic_and -> comparator ( "&&" comparator )*
  * comparator -> term ( ("==" | "!=" | "<" | "<=" | ">" | ">=" ) term )*
@@ -46,7 +47,7 @@ impl Parser {
             return Err(e);
         }
 
-        println!("Parsing: {:?}", self.tokens);
+        // println!("Parsing: {:?}", self.tokens);
         let mut statements: Vec<Stmt> = Vec::new();
 
         while *self.peek() != Token::EOF {
@@ -275,10 +276,26 @@ impl Parser {
         self.pos += 1
     }
 
-    // Rule: expression -> logic_or ( ("==" | "<" | "<=" | ">" | ">=" ) logic_or )*
+    // Rule: expression -> assignment
     fn expression(&mut self) -> Result<Expr, String> {
         // println!("expression called");
-        let expr = self.logic_or().unwrap();
+        let expr = self.assignment().unwrap();
+        Ok(expr)
+    }
+
+    // Rule: assignment -> logic_or | Identifier "=" expression
+    fn assignment(&mut self) -> Result<Expr, String> {
+        let mut expr = self.logic_or()?;
+
+        expr = match (expr.clone(), self.peek().clone()) {
+            (Expr::Ident(v_name), Token::Equal) => {
+                self.advance();
+                let value = self.assignment()?;
+                Expr::Assign { var_name: v_name, new_value: Box::new(value) }
+            },
+            _ => expr
+        };
+
         Ok(expr)
     }
 
@@ -310,6 +327,7 @@ impl Parser {
         Ok(expr)
     }
 
+    // Rule: comparator -> term ( ("==" | "!=" | "<" | "<=" | ">" | ">=" ) term )*
     fn comparator(&mut self) -> Result<Expr, String> {
         let mut expr = self.term()?;
 
@@ -832,6 +850,14 @@ mod tests {
                              T::Else,
                                 T::LSquirly, T::Ident("a".into()), T::EndLine, T::RSquirly,
                              T::EndLine, T::EOF]).parse()
+        );
+        // abc = 10;  // assumes declared abc variable
+        assert_eq!(
+            Ok(vec![Stmt::Expr(Expr::Assign {
+                var_name: "abc".into(), new_value: Box::new(Expr::Int(10))
+            })]),
+            Parser::new(vec![T::Ident("abc".into()), T::Equal,
+                             T::Int(10), T::EndLine, T::EOF]).parse()
         );
     }
 
