@@ -281,11 +281,85 @@ mod tests {
                 Stmt::Expr(Expr::Ident("max".into()))
                 ]
         ).unwrap());
+
+        // if (true && true) { 1; } else { 2; }
+        assert_eq!(1, interpreter.interpret(
+            &vec![
+                Stmt::If {
+                    cond: Expr::Logical {
+                        operator: Operator::LogicalAnd,
+                        left: Box::new(Expr::Boolean(true)),
+                        right: Box::new(Expr::Boolean(true))
+                    },
+                    then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
+                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                }]
+        ).unwrap());
+
+        // if (true && false) { 1; } else { 2; }
+        assert_eq!(2, interpreter.interpret(
+            &vec![
+                Stmt::If {
+                    cond: Expr::Logical {
+                        operator: Operator::LogicalAnd,
+                        left: Box::new(Expr::Boolean(true)),
+                        right: Box::new(Expr::Boolean(false))
+                    },
+                    then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
+                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                }]
+        ).unwrap());
+
     }
 
-    // #[test]  // TODO
-    // fn short_circuit_eval() {
-    //     let mut interpreter = Interpreter::new();
-    //     // true || { };
-    // }
+    #[test]
+    fn short_circuit_eval() {
+        let mut interpreter = Interpreter::new();
+
+        // // Short circuit evaluation
+        // var flag = false;  // true = 0, false = 1
+        // if (false && flag = true) {}
+        // flag;  // should remain as false/1
+        assert_eq!(1, interpreter.interpret(
+            &vec![
+                Stmt::VarDecl("flag".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
+                Stmt::If {
+                    cond: Expr::Logical {
+                        operator: Operator::LogicalAnd,
+                        left: Box::new(Expr::Boolean(false)),
+                        right: Box::new(Expr::Assign {
+                            var_name: "flag".into(),
+                            new_value: Box::new(Expr::Boolean(true))
+                        })
+                    },
+                    then: Box::new(Stmt::Block(vec![])),
+                    els: Box::new(Stmt::Block(vec![]))
+                },
+                Stmt::Expr(Expr::Ident("flag".into()))
+            ]
+        ).unwrap());
+
+        // // Short circuit evaluation
+        // var flag = false;  // true = 0, false = 1
+        // if (true || flag = true) {}
+        // flag;  // should remain as false/1
+        assert_eq!(1, interpreter.interpret(
+            &vec![
+                Stmt::VarDecl("flag".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
+                Stmt::If {
+                    cond: Expr::Logical {
+                        operator: Operator::LogicalOr,
+                        left: Box::new(Expr::Boolean(true)),
+                        right: Box::new(Expr::Assign {
+                            var_name: "flag".into(),
+                            new_value: Box::new(Expr::Boolean(true))
+                        })
+                    },
+                    then: Box::new(Stmt::Block(vec![])),
+                    els: Box::new(Stmt::Block(vec![]))
+                },
+                Stmt::Expr(Expr::Ident("flag".into()))
+            ]
+        ).unwrap());
+    }
 }
