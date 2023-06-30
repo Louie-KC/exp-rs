@@ -8,7 +8,7 @@ pub enum Stmt {
         els: Box<Stmt>
     },
     Block(Vec<Stmt>),
-    Var(Expr, Option<Box<Stmt>>)
+    VarDecl(String, Option<Box<Stmt>>)
 }
 
 #[derive(Debug, PartialEq, Clone)]

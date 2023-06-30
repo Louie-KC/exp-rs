@@ -42,17 +42,12 @@ impl Interpreter {
             Stmt::Block(body) => {
                 self.interpret(body).unwrap()
             }
-            Stmt::Var(ident, value) => {
+            Stmt::VarDecl(ident, value) => {
                 let val = match value {
                     Some(v) => v.clone(),
                     None => Box::new(Stmt::Expr(Expr::Int(0)))
                 };
-                let name = match ident {
-                    Expr::Ident(s) => s,
-                    _ => panic!("Interpreter fed bad variable ident expression from parser or test")
-                };
-
-                self.variables.insert(name.into(), val);
+                self.variables.insert(ident.into(), val);
                 // println!("variables after insert/update: {:?}", self.variables);
                 0
             },
@@ -172,19 +167,19 @@ mod tests {
 
         // var not_initialised;
         assert_eq!(0, interpreter.interpret(&vec![
-            Stmt::Var(Expr::Ident("not_initialised".into()), None),
+            Stmt::VarDecl("not_initialised".into(), None),
             Stmt::Expr(Expr::Ident("not_initialised".into()))
         ]).unwrap());
 
         // var tomato = 127;
         assert_eq!(127, interpreter.interpret(&vec![
-            Stmt::Var(Expr::Ident("tomato".into()), Some(Box::new(Stmt::Expr(Expr::Int(127))))),
+            Stmt::VarDecl("tomato".into(), Some(Box::new(Stmt::Expr(Expr::Int(127))))),
             Stmt::Expr(Expr::Ident("tomato".into()))
         ]).unwrap());
 
         // var b = if (false) { 1; } else { 1023; };
         assert_eq!(1023, interpreter.interpret(&vec![
-            Stmt::Var(Expr::Ident("b".into()), Some(Box::new(Stmt::If {
+            Stmt::VarDecl("b".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(false),
                 then: Box::new(Stmt::Expr(Expr::Int(1))),
                 els: Box::new(Stmt::Expr(Expr::Int(1023)))
@@ -245,9 +240,9 @@ mod tests {
         // max;
         assert_eq!(50, interpreter.interpret(
             &vec![
-                Stmt::Var(Expr::Ident("a".into()), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
-                Stmt::Var(Expr::Ident("b".into()), Some(Box::new(Stmt::Expr(Expr::Int(50))))),
-                Stmt::Var(Expr::Ident("max".into()), Some(Box::new(Stmt::If {
+                Stmt::VarDecl("a".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
+                Stmt::VarDecl("b".into(), Some(Box::new(Stmt::Expr(Expr::Int(50))))),
+                Stmt::VarDecl("max".into(), Some(Box::new(Stmt::If {
                     cond: Expr::Dyadic {
                         operator: Operator::GreaterThan,
                         left: Box::new(Expr::Ident("a".into())),

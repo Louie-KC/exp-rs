@@ -14,7 +14,7 @@ use crate::ast::*;
  *               | block
  *               | expression ";"
  *      print -> "print(" expression ");"
- *        var -> "var" Identifier ( "=" statement )? ";"
+ *    varDecl -> "var" Identifier ( "=" statement )? ";"
  *         if -> "if(" expression ")" block ( else block )?
  *      block -> "{" statement* "}"
  * 
@@ -46,6 +46,7 @@ impl Parser {
             return Err(e);
         }
 
+        println!("Parsing: {:?}", self.tokens);
         let mut statements: Vec<Stmt> = Vec::new();
 
         while *self.peek() != Token::EOF {
@@ -79,32 +80,40 @@ impl Parser {
         Stmt::Print(val.unwrap())
     }
 
-    // Rule: var -> "var" Identifier ( "=" statement )? ";"
+    // Rule: varDecl -> "var" Identifier ( "=" statement )? ";"
     fn var_statement(&mut self) -> Stmt {
         self.advance();  // var
         if !self.matches_type(Token::Ident("".into())) {
             panic!("Expected identifier after \"var\"");
         }
-        let ident = self.expression();
+        let ident = self.get_var_name();
+        self.advance();
         let value = match self.peek() {
             Token::Equal => {
-                self.advance();
+                self.advance();  // =
                 let deterministic = self.matches_type(Token::If);
                 let v = self.statement();
                 match (deterministic, self.matches_type(Token::EndLine)) {
                     (true, true)  => self.advance(),
                     (true, false) => panic!("Expected ; after var declaration"),
-                    (_, _)        => {}
-                };
+                    _        => {}
+                }
                 Some(Box::new(v))
             },
-            Token::EndLine => {
-                self.advance();
+            _ => {
+                self.advance();  // ;
                 None
             }
-            _ => panic!("var declaration: bad value")
         };
-        Stmt::Var(ident.unwrap(), value)
+        Stmt::VarDecl(ident.into(), value)
+    }
+
+    fn get_var_name(&self) -> String {
+        // Assumes self.pos points at an Ident Token
+        match self.peek() {
+            Token::Ident(s) => s.to_string(),
+            _ => panic!("bad get_var_name() call")
+        }
     }
 
     // Rule: if -> "if(" expression ")" block ( else block )?
@@ -378,7 +387,7 @@ impl Parser {
                 // }
                 expr
             },
-            _ => return Err("Invalid atom".into())
+            _ => return Err(format!("Invalid atom: {:?}", *self.peek()))
         };
         self.advance();
         Ok(expr)
@@ -785,21 +794,21 @@ mod tests {
 
     #[test]
     fn variables() {
+        // var abcdefg;
         assert_eq!(
-            // var abcdefg;
-            Ok(vec![Stmt::Var(Expr::Ident("abcdefg".into()), None)]),
+            Ok(vec![Stmt::VarDecl("abcdefg".into(), None)]),
             Parser::new(vec![T::Var, T::Ident("abcdefg".into()), T::EndLine, T::EOF]).parse()
         );
+        // var abc = 6;
         assert_eq!(
-            // var abc = 6;
-            Ok(vec![Stmt::Var(Expr::Ident("abc".into()),
+            Ok(vec![Stmt::VarDecl("abc".into(),
                             Some(Box::new(Stmt::Expr(Expr::Int(6)))))]),
             Parser::new(vec![T::Var, T::Ident("abc".into()), T::Equal,
                              T::Int(6), T::EndLine, T::EOF]).parse()
         );
+        // var abc = 3 + 2;
         assert_eq!(
-            // var abc = 3 + 2;
-            Ok(vec![Stmt::Var(Expr::Ident("abc".into()),
+            Ok(vec![Stmt::VarDecl("abc".into(),
                             Some(Box::new(Stmt::Expr(Expr::Dyadic {
                                                         operator: Operator::Plus,
                                                         left: Box::new(Expr::Int(3)),
@@ -808,9 +817,9 @@ mod tests {
             Parser::new(vec![T::Var, T::Ident("abc".into()), T::Equal, T::Int(3),
                              T::Plus, T::Int(2), T::EndLine, T::EOF]).parse()
         );
+        // var b = if (false) { 0; } else { a; };
         assert_eq!(
-            // var b = if (false) { 0; } else { a; };
-            Ok(vec![Stmt::Var(Expr::Ident("b".into()),
+            Ok(vec![Stmt::VarDecl("b".into(),
                             Some(Box::new(Stmt::If {
                                 cond: Expr::Boolean(false),
                                 then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(0))])),
