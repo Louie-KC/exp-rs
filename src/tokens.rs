@@ -30,6 +30,7 @@ pub enum Token {
     Print,
     If,
     Else,
+    While,
 
     // Grouping
     Comma,

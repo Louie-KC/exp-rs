@@ -16,6 +16,7 @@ use crate::ast::*;
  *      print -> "print(" expression ");"
  *    varDecl -> "var" Identifier ( "=" statement )? ";"
  *         if -> "if(" expression ")" block ( else block )?
+ *      while -> "while" "(" expression ")" block
  *      block -> "{" statement* "}"
  * 
  * expression -> assignment
@@ -64,6 +65,7 @@ impl Parser {
             Token::Print => self.print_statement(),
             Token::Var   => self.var_statement(),
             Token::If    => self.if_statement(),
+            Token::While => self.while_statement(),
             Token::LSquirly => self.block_statement(),
             _            => self.expression_statement()
         }
@@ -137,6 +139,19 @@ impl Parser {
             Stmt::Block(vec![])
         };
         Stmt::If{ cond: cond, then: Box::new(then), els: Box::new(els)}
+    }
+
+    // Rule: while -> "while(" expression ")" block
+    fn while_statement(&mut self) -> Stmt {
+        self.advance();  // while
+        self.advance();  // LParen
+        let cond: Expr = self.expression().unwrap();
+        if !self.matches_type(Token::RParen) {
+            panic!("Expected \")\" after while condition");
+        }
+        self.advance();  // RParen
+        let body: Stmt = self.block_statement();
+        Stmt::While { cond: cond, body: Box::new(body) }
     }
 
     // Rule: block -> "{" statement* "}"
@@ -858,6 +873,52 @@ mod tests {
             })]),
             Parser::new(vec![T::Ident("abc".into()), T::Equal,
                              T::Int(10), T::EndLine, T::EOF]).parse()
+        );
+    }
+
+    #[test]
+    fn loops() {
+        // while loops
+
+        // while (true) {}
+        assert_eq!(
+            Ok(vec![Stmt::While { cond: Expr::Boolean(true), body: Box::new(Stmt::Block(vec![])) }]),
+            Parser::new(vec![T::While, T::LParen, T::Boolean(true), T::RParen,
+                T::LSquirly, T::RSquirly, T::EOF]).parse()
+        );
+
+        // var i = 0;
+        // while (i < 5) {
+        //     i = i + 1;
+        // }
+        // i;
+        assert_eq!(Ok(vec![
+            Stmt::VarDecl("i".into(), Some(Box::new(Stmt::Expr(Expr::Int(0))))),
+            Stmt::While {
+                cond: Expr::Dyadic {
+                    operator: Operator::LessThan,
+                    left: Box::new(Expr::Ident("i".into())),
+                    right: Box::new(Expr::Int(5))
+                }, body: Box::new(Stmt::Block(vec![
+                    Stmt::Expr(Expr::Assign {
+                        var_name: "i".into(),
+                        new_value: Box::new(Expr::Dyadic {
+                            operator: Operator::Plus,
+                            left: Box::new(Expr::Ident("i".into())),
+                            right: Box::new(Expr::Int(1))
+                        })
+                    })
+                ]))
+            },
+            Stmt::Expr(Expr::Ident("i".into()))
+            ]),
+            Parser::new(vec![
+                T::Var, T::Ident("i".into()), T::Equal, T::Int(0), T::EndLine,
+                T::While, T::LParen, T::Ident("i".into()), T::LessThan, T::Int(5), T::RParen, T::LSquirly,
+                    T::Ident("i".into()), T::Equal, T::Ident("i".into()), T::Plus, T::Int(1), T::EndLine,
+                T::RSquirly,
+                T::Ident("i".into()), T::EndLine, T::EOF
+            ]).parse()
         );
     }
 

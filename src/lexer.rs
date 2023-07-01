@@ -126,6 +126,7 @@ fn text_token(iter: &mut Chars, first: char) -> Token {
         "else"  => Token::Else,
         "true"  => Token::Boolean(true),
         "false" => Token::Boolean(false),
+        "while" => Token::While,
         _       => Token::Ident(word)
     }
 }

@@ -27,7 +27,7 @@ impl Interpreter {
         let result = match stmt {
             Stmt::Print(expr) => {
                 let result = self.evalulate_expr(expr);
-                println!("Print: {:?}", result.unwrap());
+                println!("{:?}", result.unwrap());
                 0
             },
             Stmt::Expr(expr) => {
@@ -38,10 +38,17 @@ impl Interpreter {
                     0 => self.interpret_one(then).unwrap(),
                     _ => self.interpret_one(els).unwrap()
                 }
-            }
+            },
+            Stmt::While { cond, body } => {
+                let mut result = 0;
+                while self.evalulate_expr(cond)? == 0 {
+                    result = self.interpret_one(&body)?
+                }
+                result
+            },
             Stmt::Block(body) => {
                 self.interpret(body).unwrap()
-            }
+            },
             Stmt::VarDecl(ident, value) => {
                 let val = match value {
                     Some(v) => v.clone(),
@@ -359,6 +366,39 @@ mod tests {
                     els: Box::new(Stmt::Block(vec![]))
                 },
                 Stmt::Expr(Expr::Ident("flag".into()))
+            ]
+        ).unwrap());
+    }
+
+    #[test]
+    fn loops() {
+        let mut interpreter = Interpreter::new();
+
+        // var i = 0;
+        // while (i < 5) {
+        //     i = i + 1;
+        // }
+        // i;
+        assert_eq!(5, interpreter.interpret(
+            &vec![
+                Stmt::VarDecl("i".into(), Some(Box::new(Stmt::Expr(Expr::Int(0))))),
+            Stmt::While {
+                cond: Expr::Dyadic {
+                    operator: Operator::LessThan,
+                    left: Box::new(Expr::Ident("i".into())),
+                    right: Box::new(Expr::Int(5))
+                }, body: Box::new(Stmt::Block(vec![
+                    Stmt::Expr(Expr::Assign {
+                        var_name: "i".into(),
+                        new_value: Box::new(Expr::Dyadic {
+                            operator: Operator::Plus,
+                            left: Box::new(Expr::Ident("i".into())),
+                            right: Box::new(Expr::Int(1))
+                        })
+                    })
+                ]))
+            },
+            Stmt::Expr(Expr::Ident("i".into()))
             ]
         ).unwrap());
     }

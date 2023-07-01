@@ -7,6 +7,10 @@ pub enum Stmt {
         then: Box<Stmt>,
         els: Box<Stmt>
     },
+    While {
+        cond: Expr,
+        body: Box<Stmt>
+    },
     Block(Vec<Stmt>),
     VarDecl(String, Option<Box<Stmt>>)
 }
@@ -18,7 +22,6 @@ pub enum Operator {
     Star,
     Slash,
     Modulo,
-    // Assign,
     EqualTo,
     NotEqualTo,
     LessThan,
