@@ -31,6 +31,7 @@ pub enum Token {
     If,
     Else,
     While,
+    For,
 
     // Grouping
     Comma,

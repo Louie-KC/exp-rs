@@ -11,12 +11,15 @@ use crate::ast::*;
  *  statement -> print
  *               | var
  *               | if
+ *               | while
+ *               | for
  *               | block
  *               | expression ";"
  *      print -> "print(" expression ");"
  *    varDecl -> "var" Identifier ( "=" statement )? ";"
  *         if -> "if(" expression ")" block ( else block )?
  *      while -> "while" "(" expression ")" block
+ *        for -> "for" "(" ( varDeclr | expression )? ";" expression? ";" expression ")" block
  *      block -> "{" statement* "}"
  * 
  * expression -> assignment
@@ -66,6 +69,7 @@ impl Parser {
             Token::Var   => self.var_statement(),
             Token::If    => self.if_statement(),
             Token::While => self.while_statement(),
+            Token::For   => self.for_statement(),
             Token::LSquirly => self.block_statement(),
             _            => self.expression_statement()
         }
@@ -154,6 +158,54 @@ impl Parser {
         Stmt::While { cond: cond, body: Box::new(body) }
     }
 
+    // Rule: for -> "for" "(" ( varDeclr | expression )? ";" expression? ";" expression ")" block
+    fn for_statement(&mut self) -> Stmt {
+        self.advance(); // for
+        self.advance(); // LParen
+
+        let init = match self.peek() {
+            Token::EndLine => {
+                self.advance();
+                None
+            },
+            _ => Some(self.statement())
+        };
+
+        let cond = match self.peek() {
+            Token::EndLine => Expr::Boolean(true),
+            _ => self.expression().unwrap()
+        };
+        self.advance();  // ;
+
+        let step = match self.peek() {
+            Token::RParen => None,
+            _ => Some(self.expression().unwrap())
+        };
+
+        // println!("{:?}, {:?}, {:?}", init, cond, step);
+        if !self.matches_type(Token::RParen) {
+            panic!("expected closing parenthese in for loop. Found {:?}", self.peek())
+        }
+        self.advance();  // RParen
+
+        // assembling
+        let mut loop_body = match self.block_statement() {
+            Stmt::Block(stmts) => stmts,
+            _ => panic!("For loop expected a body of block statement")
+        };
+        if let Some(step_expr) = step {
+            loop_body.push(Stmt::Expr(step_expr));
+        }
+        let main_loop = Stmt::While {
+            cond: cond,
+            body: Box::new(Stmt::Block(loop_body))
+        };
+        match init {
+            Some(init_stmt) => Stmt::Block(vec![init_stmt, main_loop]),
+            None => main_loop
+        }
+    }
+
     // Rule: block -> "{" statement* "}"
     fn block_statement(&mut self) -> Stmt {
         self.advance();  // {
@@ -163,9 +215,8 @@ impl Parser {
             statements.push(self.statement());
             peek = self.tokens.get(self.pos).unwrap();
         }
-        // let body = self.statement();
         if !self.matches_type(Token::RSquirly) {
-            panic!("block expected \"}}\"");
+            panic!("block expected \"}}\", found {:?}", self.peek());
         }
         self.advance();  // }
         Stmt::Block(statements)
@@ -878,8 +929,6 @@ mod tests {
 
     #[test]
     fn loops() {
-        // while loops
-
         // while (true) {}
         assert_eq!(
             Ok(vec![Stmt::While { cond: Expr::Boolean(true), body: Box::new(Stmt::Block(vec![])) }]),
@@ -920,6 +969,82 @@ mod tests {
                 T::Ident("i".into()), T::EndLine, T::EOF
             ]).parse()
         );
+
+        // for (;;) {}
+        assert_eq!(
+            Ok(vec![Stmt::While { cond: Expr::Boolean(true), body: Box::new(Stmt::Block(vec![])) }]),
+            Parser::new(vec![T::For, T::LParen, T::EndLine, T::EndLine, T::RParen,
+                T::LSquirly, T::RSquirly, T::EOF]).parse()
+        );
+        
+        // for (var i = 0; i < 10; i = i + 1) {}
+        assert_eq!(Ok(vec![
+                Stmt::Block(vec![
+                    Stmt::VarDecl("i".into(), Some(Box::new(Stmt::Expr(Expr::Int(0))))),
+                    Stmt::While {
+                        cond: Expr::Dyadic {
+                            operator: Operator::LessThan,
+                            left: Box::new(Expr::Ident("i".into())),
+                            right: Box::new(Expr::Int(10))
+                        },
+                        body: Box::new(Stmt::Block(vec![
+                            Stmt::Expr(Expr::Assign {
+                                var_name: "i".into(),
+                                new_value: Box::new(Expr::Dyadic {
+                                    operator: Operator::Plus,
+                                    left: Box::new(Expr::Ident("i".into())),
+                                    right: Box::new(Expr::Int(1))
+                                })
+                            })
+                        ]))
+                    }
+                ]),
+            ]),
+            Parser::new(vec![
+                T::For, T::LParen, T::Var, T::Ident("i".into()), T::Equal, T::Int(0), T::EndLine,
+                    T::Ident("i".into()), T::LessThan, T::Int(10), T::EndLine,
+                    T::Ident("i".into()), T::Equal, T::Ident("i".into()), T::Plus, T::Int(1),
+                T::RParen, T::LSquirly, T::RSquirly, T::EOF
+            ]).parse()
+        );
+
+        // for (var i = 0; i < 10; i = i + 1) { print(i/2); }
+        assert_eq!(Ok(vec![
+            Stmt::Block(vec![
+                Stmt::VarDecl("i".into(), Some(Box::new(Stmt::Expr(Expr::Int(0))))),
+                Stmt::While {
+                    cond: Expr::Dyadic {
+                        operator: Operator::LessThan,
+                        left: Box::new(Expr::Ident("i".into())),
+                        right: Box::new(Expr::Int(10))
+                    },
+                    body: Box::new(Stmt::Block(vec![
+                        Stmt::Print(Expr::Dyadic {
+                            operator: Operator::Slash,
+                            left: Box::new(Expr::Ident("i".into())),
+                            right: Box::new(Expr::Int(2))
+                        }),
+                        Stmt::Expr(Expr::Assign {
+                            var_name: "i".into(),
+                            new_value: Box::new(Expr::Dyadic {
+                                operator: Operator::Plus,
+                                left: Box::new(Expr::Ident("i".into())),
+                                right: Box::new(Expr::Int(1))
+                            })
+                        })
+                    ]))
+                }
+            ]),
+        ]),
+        Parser::new(vec![
+            T::For, T::LParen, T::Var, T::Ident("i".into()), T::Equal, T::Int(0), T::EndLine,
+                T::Ident("i".into()), T::LessThan, T::Int(10), T::EndLine,
+                T::Ident("i".into()), T::Equal, T::Ident("i".into()), T::Plus, T::Int(1),
+            T::RParen, T::LSquirly,
+                T::Print, T::LParen, T::Ident("i".into()), T::Slash, T::Int(2), T::RParen, T::EndLine,
+            T::RSquirly, T::EOF
+        ]).parse()
+    );
     }
 
 }
