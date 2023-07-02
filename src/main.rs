@@ -1,3 +1,6 @@
+use std::env;
+use std::fs;
+
 use crate::parser::Parser;
 use crate::interpreter::Interpreter;
 
@@ -8,22 +11,14 @@ mod parser;
 mod interpreter;
 
 fn main() {
-    // let source = String::from("1 + 2 + -3");
-    // let source = String::from("1 + -2 + 3 + 4");
-    // let source = String::from("1 * 2 * 4");
-    // let source = String::from("1 + 2 + 4 + 5;");
-    // let source = String::from("3 + 5; print(1 + 2); 2 - 1;");
-    let source = r#"
-        print(6);
-        if (true) {  // eeeeeeeeeeeee
-            print(5);
-            print(50);
-        } else {
-            print(3333333);
-        }
-        if (true) {}
-        print(4);
-        "#.to_string();
+    let args: Vec<String> = env::args().collect();
+    let source = match args.get(1) {
+        Some(path) => fs::read_to_string(path).expect("Source file readable"),
+        None => "".to_string()
+    };
+    
+    println!("{}", source);
+
     let tokens = lexer::tokenise(source);
     // for token in &tokens {
     //     println!("{:?}", token);

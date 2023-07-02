@@ -14,7 +14,7 @@ pub fn tokenise(source: String) -> Vec<Token> {
 
 fn next_token(iter: &mut Chars) -> Option<Token> {
     let mut first = iter.next()?;
-    while first.eq(&' ') || first.eq(&'\n') {
+    while first.is_whitespace() || is_newline(&first) {
         first = iter.next()?;
     }
     while is_comment(&first, iter) {
@@ -50,6 +50,13 @@ fn is_comment(first: &char, iter: &mut Chars) -> bool {
     match (first, iter.clone().next().unwrap_or(' ')) {
         ('/', '/') => true,
         _ => false
+    }
+}
+
+fn is_newline(first: &char) -> bool {
+    match *first as u32 {
+        10 | 13 => true,
+        _       => false
     }
 }
 
