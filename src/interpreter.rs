@@ -3,12 +3,12 @@ use std::{collections::HashMap};
 use crate::ast::*;
 
 pub struct Interpreter {
-    variables: HashMap<String, Box<Stmt>>
+    env_stack: Vec<HashMap<String, i32>>
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        Self { variables: HashMap::new() }
+        Self { env_stack: vec![HashMap::new()] }
     }
     
     pub fn interpret(&mut self, statements: &Vec<Stmt>) -> Result<i32, String> {
@@ -24,6 +24,7 @@ impl Interpreter {
     }
     
     fn evaluate_stmt(&mut self, stmt: &Stmt) -> Result<i32, String> {
+        // println!("Evaluating: {:?}", stmt);
         let result = match stmt {
             Stmt::Print(expr) => {
                 let result = self.evalulate_expr(expr);
@@ -47,15 +48,20 @@ impl Interpreter {
                 result
             },
             Stmt::Block(body) => {
-                self.interpret(body).unwrap()
+                self.env_stack.push(HashMap::new());
+                let result = self.interpret(body).unwrap();
+                self.env_stack.pop();
+                result
             },
             Stmt::VarDecl(ident, value) => {
+                if self.current_env_has(ident.into()) {
+                    panic!("Variable \"{}\" already declared in current scope", ident)
+                }
                 let val = match value {
-                    Some(v) => v.clone(),
-                    None => Box::new(Stmt::Expr(Expr::Int(0)))
+                    Some(v) => self.evaluate_stmt(v).unwrap(),
+                    None => 0
                 };
-                self.variables.insert(ident.into(), val);
-                // println!("variables after insert/update: {:?}", self.variables);
+                self.add_to_current_scope(ident.into(), val);
                 0
             },
         };
@@ -69,8 +75,8 @@ impl Interpreter {
             Expr::Boolean(true)  => 0,
             Expr::Boolean(false) => 1,
             Expr::Ident(s) => {
-                match self.retrieve_ident(s) {
-                    Some(stmt) => self.interpret_one(&stmt).unwrap(),
+                match self.get_from_env(s).cloned() {
+                    Some(val) => val,
                     None => return Err(format!("Undefined variable {}", s))
                 }
             },
@@ -116,9 +122,9 @@ impl Interpreter {
             }
             Expr::Assign { var_name, new_value } => {
                 let val = self.evalulate_expr(new_value)?;
-                match self.variables.contains_key(var_name) {
-                    true  => self.variables.insert(var_name.into(), Box::new(Stmt::Expr(Expr::Int(val)))),
-                    false => panic!("Cannot assign to {} as it is not declared", var_name),
+                match self.get_from_env(var_name) {
+                    Some(_) => self.update_var_in_env(var_name.into(), val),
+                    None    => panic!("Cannot assign to {} as it is not declared", var_name),
                 };
                 val
             },
@@ -126,8 +132,59 @@ impl Interpreter {
         Ok(result)
     }
 
-    fn retrieve_ident(&mut self, name: &String) -> Option<Box<Stmt>> {
-        self.variables.get(name).cloned()
+    fn get_stack_size(&self) -> usize {
+        self.env_stack.len()
+    }
+
+    /// Searches for the variable specified by the 'name' parameter and returns
+    /// its value.
+    /// The variable is searched for beginning from the current/inner-most scope.
+    fn get_from_env(&self, name: &String) -> Option<&i32> {
+        // println!("get_from_env:");
+        // dbg!(self.env_stack.clone());
+        let mut result = None;
+        // Begin outward search from inner most scope
+        for env in self.env_stack.iter().rev() {
+            result = env.get(name);
+            if result != None { break; }
+        }
+        result
+    }
+
+    /// Determines whether a variable with the parameter 'name' already exists
+    /// in the current/inner-most scope.
+    fn current_env_has(&self, name: &String) -> bool {
+        // println!("current_env_has:");
+        // dbg!(self.env_stack.clone());
+        match self.env_stack.last().unwrap().get(name) {
+            Some(_) => true,
+            None    => false
+        }
+    }
+
+    /// Updates the value of an existing variable with the 'name' parameter.
+    /// The search for the specified variable works outwards from the inner most
+    /// scope.
+    fn update_var_in_env(&mut self, name: &String, value: i32) -> () {
+        for env in self.env_stack.iter_mut().rev() {
+            if env.contains_key(name) {
+                env.insert(name.into(), value);
+                return;
+            }
+        }
+        panic!("Variable \"{}\" does not exist", name);
+    }
+
+    /// Adds/declares a variable with the value to the current or inner most scope.
+    fn add_to_current_scope(&mut self, name: &String, value: i32) -> () {
+        match self.env_stack.last_mut() {
+            Some(env) => {
+                env.insert(name.into(), value);
+            },
+            None    => panic!("All enviroments have been cleared")
+        }
+        // println!("add_to_current_scope: {}", name);
+        // dbg!(self.env_stack.clone());
     }
 }
 
@@ -182,25 +239,28 @@ mod tests {
                    interpreter.interpret_one(&Stmt::Expr(Expr::Ident("my_var".into()))));
 
         // var not_initialised;
+        // not_initialised;
         assert_eq!(0, interpreter.interpret(&vec![
             Stmt::VarDecl("not_initialised".into(), None),
             Stmt::Expr(Expr::Ident("not_initialised".into()))
         ]).unwrap());
 
         // var tomato = 127;
+        // tomato;
         assert_eq!(127, interpreter.interpret(&vec![
             Stmt::VarDecl("tomato".into(), Some(Box::new(Stmt::Expr(Expr::Int(127))))),
             Stmt::Expr(Expr::Ident("tomato".into()))
         ]).unwrap());
 
-        // var b = if (false) { 1; } else { 1023; };
+        // var c = if (false) { 1; } else { 1023; };
+        // c;
         assert_eq!(1023, interpreter.interpret(&vec![
-            Stmt::VarDecl("b".into(), Some(Box::new(Stmt::If {
+            Stmt::VarDecl("c".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(false),
                 then: Box::new(Stmt::Expr(Expr::Int(1))),
                 els: Box::new(Stmt::Expr(Expr::Int(1023)))
             }))),
-            Stmt::Expr(Expr::Ident("b".into()))
+            Stmt::Expr(Expr::Ident("c".into()))
         ]).unwrap());
 
         // var a = 10;
@@ -324,48 +384,48 @@ mod tests {
         let mut interpreter = Interpreter::new();
 
         // // Short circuit evaluation
-        // var flag = false;  // true = 0, false = 1
-        // if (false && flag = true) {}
-        // flag;  // should remain as false/1
+        // var flag_one = false;  // true = 0, false = 1
+        // if (false && flag_one = true) {}
+        // flag_one;  // should remain as false/1
         assert_eq!(1, interpreter.interpret(
             &vec![
-                Stmt::VarDecl("flag".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
+                Stmt::VarDecl("flag_one".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
                     cond: Expr::Logical {
                         operator: Operator::LogicalAnd,
                         left: Box::new(Expr::Boolean(false)),
                         right: Box::new(Expr::Assign {
-                            var_name: "flag".into(),
+                            var_name: "flag_one".into(),
                             new_value: Box::new(Expr::Boolean(true))
                         })
                     },
                     then: Box::new(Stmt::Block(vec![])),
                     els: Box::new(Stmt::Block(vec![]))
                 },
-                Stmt::Expr(Expr::Ident("flag".into()))
+                Stmt::Expr(Expr::Ident("flag_one".into()))
             ]
         ).unwrap());
 
         // // Short circuit evaluation
-        // var flag = false;  // true = 0, false = 1
-        // if (true || flag = true) {}
-        // flag;  // should remain as false/1
+        // var flag_two = false;  // true = 0, false = 1
+        // if (true || flag_two = true) {}
+        // flag_two;  // should remain as false/1
         assert_eq!(1, interpreter.interpret(
             &vec![
-                Stmt::VarDecl("flag".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
+                Stmt::VarDecl("flag_two".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
                     cond: Expr::Logical {
                         operator: Operator::LogicalOr,
                         left: Box::new(Expr::Boolean(true)),
                         right: Box::new(Expr::Assign {
-                            var_name: "flag".into(),
+                            var_name: "flag_two".into(),
                             new_value: Box::new(Expr::Boolean(true))
                         })
                     },
                     then: Box::new(Stmt::Block(vec![])),
                     els: Box::new(Stmt::Block(vec![]))
                 },
-                Stmt::Expr(Expr::Ident("flag".into()))
+                Stmt::Expr(Expr::Ident("flag_two".into()))
             ]
         ).unwrap());
     }
@@ -401,5 +461,108 @@ mod tests {
             Stmt::Expr(Expr::Ident("i".into()))
             ]
         ).unwrap());
+    }
+
+    #[test]
+    fn environment_scoping() {
+        let mut interpreter = Interpreter::new();
+        assert_eq!(1, interpreter.get_stack_size());
+
+        // var toast = 5;
+        // if (true) {
+        //     var toast = 10;
+        //     toast = toast + 1;  // should not modify `toast` declared on the first line
+        // }
+        // toast;
+        assert_eq!(5, interpreter.interpret(&vec![
+            Stmt::VarDecl("toast".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
+            Stmt::If {
+                cond: Expr::Boolean(true),
+                then: Box::new(Stmt::Block(vec![
+                    Stmt::VarDecl("toast".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
+                    Stmt::Expr(Expr::Dyadic {
+                        operator: Operator::Plus,
+                        left: Box::new(Expr::Ident("toast".into())),
+                        right: Box::new(Expr::Int(1))
+                    })
+                ])),
+                els: Box::new(Stmt::Block(vec![]))
+            },
+            Stmt::Expr(Expr::Ident("toast".into()))
+        ]).unwrap());
+
+        // var abc = 5;
+        // var result = if (true) {
+        //     var abc = 10;
+        //     abc;  // Should refer to the var `abc` declared in the line above
+        // }
+        // result;
+        assert_eq!(10, interpreter.interpret(&vec![
+            Stmt::VarDecl("abc".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
+            Stmt::VarDecl("result".into(), Some(Box::new(Stmt::If {
+                cond: Expr::Boolean(true),
+                then: Box::new(Stmt::Block(vec![
+                    Stmt::VarDecl("abc".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
+                    Stmt::Expr(Expr::Ident("abc".into()))
+                ])),
+                els: Box::new(Stmt::Block(vec![]))
+            }))),
+            Stmt::Expr(Expr::Ident("result".into()))
+        ]).unwrap());
+
+        // var abcd = 5;
+        // var output = if (false) {
+        //     var abcd = 10;
+        //     abcd; // Should refer to the var `abcd` declared in the line above
+        // } else {
+        //    var abcd = abcd;  // LHS: separate from `then` block, RHS: from the first line
+        //    abcd = abcd + 1;
+        //    abcd;  // should refer to `abcd` declared in the two lines above
+        // }
+        // output;
+        assert_eq!(6, interpreter.interpret(&vec![
+            Stmt::VarDecl("abcd".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
+            Stmt::VarDecl("output".into(), Some(Box::new(Stmt::If {
+                cond: Expr::Boolean(false),
+                then: Box::new(Stmt::Block(vec![
+                    Stmt::VarDecl("abcd".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
+                    Stmt::Expr(Expr::Ident("abcd".into()))
+                ])),
+                els: Box::new(Stmt::Block(vec![
+                    Stmt::VarDecl("abcd".into(), Some(Box::new(Stmt::Expr(Expr::Ident("abcd".into()))))),
+                    Stmt::Expr(Expr::Assign {
+                        var_name: "abcd".into(),
+                        new_value: Box::new(Expr::Dyadic {
+                            operator: Operator::Plus,
+                            left: Box::new(Expr::Ident("abcd".into())),
+                            right: Box::new(Expr::Int(1))
+                        })
+                    }),
+                    Stmt::Expr(Expr::Ident("abcd".into()))
+                ]))
+            }))),
+            Stmt::Expr(Expr::Ident("output".into()))
+        ]).unwrap());
+
+        // var abcde = 5;
+        // var ignored = if (true) {
+        //     var abcde = 10;
+        //     abcde;  // Should refer to the var `abcde` declared in the line above
+        // }
+        // abcde;  // original abcde from the first line
+        assert_eq!(5, interpreter.interpret(&vec![
+            Stmt::VarDecl("abcde".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
+            Stmt::VarDecl("ignored".into(), Some(Box::new(Stmt::If {
+                cond: Expr::Boolean(true),
+                then: Box::new(Stmt::Block(vec![
+                    Stmt::VarDecl("abcde".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
+                    Stmt::Expr(Expr::Ident("abcde".into()))
+                ])),
+                els: Box::new(Stmt::Block(vec![]))
+            }))),
+            Stmt::Expr(Expr::Ident("abcde".into()))
+        ]).unwrap());
+
+        assert_eq!(1, interpreter.get_stack_size());
     }
 }
