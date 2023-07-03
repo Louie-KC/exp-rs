@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::{collections::HashMap, mem::discriminant};
 
 use crate::ast::*;
 
@@ -48,9 +48,14 @@ impl Interpreter {
                 result
             },
             Stmt::Block(body) => {
-                self.env_stack.push(HashMap::new());
+                let needs_own_env = self.block_needs_stack(&body);
+                if needs_own_env {
+                    self.env_stack.push(HashMap::new());
+                }
                 let result = self.interpret(body).unwrap();
-                self.env_stack.pop();
+                if needs_own_env {
+                    self.env_stack.pop();
+                }
                 result
             },
             Stmt::VarDecl(ident, value) => {
@@ -134,6 +139,17 @@ impl Interpreter {
 
     fn get_stack_size(&self) -> usize {
         self.env_stack.len()
+    }
+
+    /// Determines whether a block statement needs its own variable environment added onto the
+    /// environment stack by checking if the statements of the block make any declarations.
+    fn block_needs_stack(&self, stack_body: &Vec<Stmt>) -> bool {
+        for stmt in stack_body {
+            if discriminant(stmt) == discriminant(&Stmt::VarDecl("".into(), None)) {
+                return true
+            }
+        }
+        false
     }
 
     /// Searches for the variable specified by the 'name' parameter and returns
@@ -466,6 +482,22 @@ mod tests {
     #[test]
     fn environment_scoping() {
         let mut interpreter = Interpreter::new();
+        assert_eq!(false, interpreter.block_needs_stack(&vec![
+            Stmt::Print(Expr::Ident("aaa".into())),
+            Stmt::Block(vec![
+                Stmt::VarDecl("aaa".into(), None)  // ignored as not at the top level of statements
+            ]),
+            Stmt::Expr(Expr::Assign {
+                var_name: "aaa".into(),
+                new_value: Box::new(Expr::Int(2))
+            })
+        ]));
+
+        assert_eq!(true, interpreter.block_needs_stack(&vec![
+            Stmt::VarDecl("aaa".into(), None),  // declaration at top level of block statements
+            Stmt::Block(vec![Stmt::Print(Expr::Ident("aaa".into()))]),
+        ]));
+
         assert_eq!(1, interpreter.get_stack_size());
 
         // var toast = 5;
