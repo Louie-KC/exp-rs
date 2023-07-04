@@ -133,6 +133,7 @@ impl Interpreter {
                 };
                 val
             },
+            Expr::Call { callee: _, params: _ } => todo!(),
         };
         Ok(result)
     }

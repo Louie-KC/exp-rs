@@ -29,7 +29,8 @@ use crate::ast::*;
  * comparator -> term ( ("==" | "!=" | "<" | "<=" | ">" | ">=" ) term )*
  *       term -> factor ( ( "+" | "-" ) factor)*
  *     factor -> unary ( ( "*" | "/" | "%" ) unary)*
- *      unary -> atom | "+" unary | "-" unary
+ *      unary -> fn_call | "+" fn_call | "-" fn_call
+ *    fn_call -> atom | atom "(" expression ( "," expression )* ")"
  *       atom -> "(" expression ")" | Integer | Identifier | Boolean
  */
 
@@ -442,18 +443,44 @@ impl Parser {
         Ok(expr)
     }
 
-    // Rule: unary -> atom | "+" unary | "-" unary
+    // Rule: unary -> fn_call | "+" fn_call | "-" fn_call
     fn unary(&mut self) -> Result<Expr, String> {
         // println!("unary called");
         if self.matches_type(Token::Plus) {
             self.advance();
-            return Ok(Expr::Monadic { operator: Operator::Plus, operand: Box::new(self.unary()?) })
+            return Ok(Expr::Monadic { operator: Operator::Plus, operand: Box::new(self.fn_call()?) })
         }
         if self.matches_type(Token::Minus) {
             self.advance();
-            return Ok(Expr::Monadic { operator: Operator::Minus, operand: Box::new(self.unary()?) })
+            return Ok(Expr::Monadic { operator: Operator::Minus, operand: Box::new(self.fn_call()?) })
         }
-        self.atom()
+        self.fn_call()
+    }
+
+    // fn_call -> atom | atom "(" expression ( "," expression )* ")"
+    fn fn_call(&mut self) -> Result<Expr, String> {
+        let expr = self.atom();
+        let peek = self.peek();
+        // println!("fn_call pre-match: {:?}, {:?}", expr, peek);
+        match (expr.clone().unwrap(), peek) {
+            (Expr::Ident(callee), Token::LParen) => {
+                self.advance();  // LParen
+                let mut args: Vec<Expr> = Vec::new();
+                while !self.matches_type(Token::RParen) {
+                    // println!("fn_call while: {:?}", self.peek());
+                    args.push(self.expression().unwrap());
+                    if self.matches_type(Token::Comma) {
+                        self.advance();
+                    }    
+                }
+                if args.len() > 255 {
+                    panic!("Too many arguments for function {}", callee)
+                }
+                self.advance();  // RParen
+                Ok(Expr::Call { callee: callee, params: args })
+            },
+            _ => expr
+        }
     }
 
     // Rule: atom -> "(" expression ")" | Integer | Identifier | Boolean
@@ -1043,8 +1070,52 @@ mod tests {
             T::RParen, T::LSquirly,
                 T::Print, T::LParen, T::Ident("i".into()), T::Slash, T::Int(2), T::RParen, T::EndLine,
             T::RSquirly, T::EOF
-        ]).parse()
-    );
+        ]).parse());
+    }
+
+    #[test]
+    fn function_calls() {
+        // foo();
+        assert_eq!(
+            Ok(vec![Stmt::Expr(Expr::Call { callee: "foo".into(), params: vec![] })]),
+            Parser::new(vec![T::Ident("foo".into()), T::LParen, T::RParen, T::EndLine, T::EOF]).parse()
+        );
+
+        // bar(1);
+        assert_eq!(
+            Ok(vec![Stmt::Expr(Expr::Call {
+                callee: "bar".into(),
+                params: vec![Expr::Int(1)]
+            })]),
+            Parser::new(vec![T::Ident("bar".into()), T::LParen, T::Int(1), T::RParen, T::EndLine, T::EOF]).parse()
+        );
+
+        // max(0, foo());
+        assert_eq!(
+            Ok(vec![Stmt::Expr(Expr::Call {
+                callee: "max".into(),
+                params: vec![Expr::Int(0), Expr::Call { callee: "foo".into(), params: vec![] }]
+            })]),
+            Parser::new(vec![T::Ident("max".into()), T::LParen,
+                                T::Int(0), T::Comma,
+                                T::Ident("foo".into()), T::LParen,
+                             T::RParen, T::RParen, T::EndLine, T::EOF]).parse()
+        );
+
+        // baz(1, 2, 3, 4);
+        assert_eq!(
+            Ok(vec![Stmt::Expr(Expr::Call {
+                callee: "baz".into(),
+                params: vec![Expr::Int(1), Expr::Int(2), Expr::Int(3), Expr::Int(4)]
+            })]),
+            Parser::new(vec![T::Ident("baz".into()), T::LParen,
+                                T::Int(1), T::Comma,
+                                T::Int(2), T::Comma,
+                                T::Int(3), T::Comma,
+                                T::Int(4),
+                             T::RParen, T::EndLine, T::EOF]).parse()
+        )
+
     }
 
 }

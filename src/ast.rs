@@ -55,4 +55,8 @@ pub enum Expr {
         var_name: String,
         new_value: Box<Expr>
     },
+    Call {
+        callee: String,
+        params: Vec<Expr>
+    }
 }
