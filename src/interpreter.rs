@@ -2,13 +2,40 @@ use std::{collections::HashMap, mem::discriminant};
 
 use crate::ast::*;
 
+struct Function {
+    params: Vec<String>,
+    body: Stmt
+}
+
+impl Function {
+    fn new(parameters: Vec<String>, body: Stmt) -> Self {
+        if discriminant(&body) != discriminant(&Stmt::Block(vec![])) {
+            panic!("Function::new bad body statement")
+        }
+        Self { params: parameters, body: body }
+    }
+}
+
+struct Environment {
+    variables: HashMap<String, i32>,
+    functions: HashMap<String, Function>
+}
+
+impl Environment {
+    fn new() -> Self {
+        Self { variables: HashMap::new(), functions: HashMap::new() }
+    }
+}
+
 pub struct Interpreter {
-    env_stack: Vec<HashMap<String, i32>>
+    // env_stack: Vec<HashMap<String, i32>>
+    env_stack: Vec<Environment>
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        Self { env_stack: vec![HashMap::new()] }
+        // Self { env_stack: vec![HashMap::new()] }
+        Self { env_stack: vec![Environment::new()] }
     }
     
     pub fn interpret(&mut self, statements: &Vec<Stmt>) -> Result<i32, String> {
@@ -50,7 +77,7 @@ impl Interpreter {
             Stmt::Block(body) => {
                 let needs_own_env = self.block_needs_stack(&body);
                 if needs_own_env {
-                    self.env_stack.push(HashMap::new());
+                    self.env_stack.push(Environment::new());
                 }
                 let result = self.interpret(body).unwrap();
                 if needs_own_env {
@@ -66,7 +93,16 @@ impl Interpreter {
                     Some(v) => self.evaluate_stmt(v).unwrap(),
                     None => 0
                 };
-                self.add_to_current_scope(ident.into(), val);
+                self.add_var(ident.into(), val);
+                0
+            },
+            Stmt::FnDecl { name, parameters, body } => {
+                let fn_env = &mut self.env_stack.last_mut().unwrap().functions;
+                if fn_env.contains_key(name) {
+                    panic!("function \"{}\" already declared in scope", name)
+                }
+                let function = Function::new(parameters.clone(), *body.clone());
+                fn_env.insert(name.into(), function);
                 0
             },
         };
@@ -80,7 +116,7 @@ impl Interpreter {
             Expr::Boolean(true)  => 0,
             Expr::Boolean(false) => 1,
             Expr::Ident(s) => {
-                match self.get_from_env(s).cloned() {
+                match self.get_var(s).cloned() {
                     Some(val) => val,
                     None => return Err(format!("Undefined variable {}", s))
                 }
@@ -127,13 +163,37 @@ impl Interpreter {
             }
             Expr::Assign { var_name, new_value } => {
                 let val = self.evalulate_expr(new_value)?;
-                match self.get_from_env(var_name) {
-                    Some(_) => self.update_var_in_env(var_name.into(), val),
+                match self.get_var(var_name) {
+                    Some(_) => self.update_var(var_name.into(), val),
                     None    => panic!("Cannot assign to {} as it is not declared", var_name),
                 };
                 val
             },
-            Expr::Call { callee: _, params: _ } => todo!(),
+            Expr::Call { callee, args } => {
+                let mut function: Option<&Function> = None;
+                for env in self.env_stack.iter().rev() {
+                    function = env.functions.get(callee);
+                    if function.is_some() {
+                        break;
+                    }
+                }
+                let (param_names, body) = (function.unwrap().params.clone(), function.unwrap().body.clone());
+
+                if param_names.len() != args.len() {
+                    panic!("Incorrect number of parameter arguments")
+                }
+
+                let mut block: Vec<Stmt> = param_names.into_iter()
+                    .enumerate()
+                    .map(|(i, n)| Stmt::VarDecl(n.into(), Some(Box::new(Stmt::Expr(args.get(i).unwrap().clone())))))
+                    .collect();
+
+                block.push(body);
+
+                self.evaluate_stmt(&Stmt::Block(block)).unwrap()
+                
+                // 0
+            },
         };
         Ok(result)
     }
@@ -156,14 +216,14 @@ impl Interpreter {
     /// Searches for the variable specified by the 'name' parameter and returns
     /// its value.
     /// The variable is searched for beginning from the current/inner-most scope.
-    fn get_from_env(&self, name: &String) -> Option<&i32> {
+    fn get_var(&self, name: &String) -> Option<&i32> {
         // println!("get_from_env:");
         // dbg!(self.env_stack.clone());
         let mut result = None;
         // Begin outward search from inner most scope
         for env in self.env_stack.iter().rev() {
-            result = env.get(name);
-            if result != None { break; }
+            result = env.variables.get(name);
+            if result.is_some() { break; }
         }
         result
     }
@@ -173,7 +233,7 @@ impl Interpreter {
     fn current_env_has(&self, name: &String) -> bool {
         // println!("current_env_has:");
         // dbg!(self.env_stack.clone());
-        match self.env_stack.last().unwrap().get(name) {
+        match self.env_stack.last().unwrap().variables.get(name) {
             Some(_) => true,
             None    => false
         }
@@ -182,10 +242,10 @@ impl Interpreter {
     /// Updates the value of an existing variable with the 'name' parameter.
     /// The search for the specified variable works outwards from the inner most
     /// scope.
-    fn update_var_in_env(&mut self, name: &String, value: i32) -> () {
+    fn update_var(&mut self, name: &String, value: i32) -> () {
         for env in self.env_stack.iter_mut().rev() {
-            if env.contains_key(name) {
-                env.insert(name.into(), value);
+            if env.variables.contains_key(name) {
+                env.variables.insert(name.into(), value);
                 return;
             }
         }
@@ -193,18 +253,13 @@ impl Interpreter {
     }
 
     /// Adds/declares a variable with the value to the current or inner most scope.
-    fn add_to_current_scope(&mut self, name: &String, value: i32) -> () {
+    fn add_var(&mut self, name: &String, value: i32) -> () {
         match self.env_stack.last_mut() {
-            Some(env) => {
-                env.insert(name.into(), value);
-            },
+            Some(env) => { env.variables.insert(name.into(), value); },
             None    => panic!("All enviroments have been cleared")
         }
-        // println!("add_to_current_scope: {}", name);
-        // dbg!(self.env_stack.clone());
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -596,6 +651,77 @@ mod tests {
             Stmt::Expr(Expr::Ident("abcde".into()))
         ]).unwrap());
 
+        assert_eq!(1, interpreter.get_stack_size());
+    }
+
+    #[test]
+    fn functions() {
+        let mut interpreter = Interpreter::new();
+
+        // fn abs(n) {
+        //     if (n < 0) { n = n * -1; }
+        //     n;
+        // }
+        // abs(-5);
+        assert_eq!(5, interpreter.interpret(&vec![
+            Stmt::FnDecl {
+                name: "abs".into(),
+                parameters: vec!["n".to_string()],
+                body: Box::new(Stmt::Block(vec![
+                    Stmt::If {
+                        cond: Expr::Dyadic {
+                            operator: Operator::LessThan,
+                            left: Box::new(Expr::Ident("n".into())),
+                            right: Box::new(Expr::Int(0))
+                        },
+                        then: Box::new(Stmt::Expr(Expr::Assign {
+                            var_name: "n".into(),
+                            new_value: Box::new(Expr::Dyadic {
+                                operator: Operator::Star,
+                                left: Box::new(Expr::Ident("n".into())),
+                                right: Box::new(Expr::Monadic {
+                                    operator: Operator::Minus,
+                                    operand: Box::new(Expr::Int(1))
+                                })
+                            })
+                        })),
+                        els: Box::new(Stmt::Block(vec![]))
+                    },
+                Stmt::Expr(Expr::Ident("n".into()))
+                ]))
+            },
+            Stmt::Expr(Expr::Call {
+                callee: "abs".into(),
+                args: vec![Expr::Int(-5)]
+            })
+        ]).unwrap());
+
+        // fn max(a, b) {
+        //     if (a > b) {
+        //        a;
+        //     } else {
+        //        b;
+        //     }
+        // }
+        // max(128, 64);
+        assert_eq!(128, interpreter.interpret(&vec![
+            Stmt::FnDecl {
+                name: "max".into(),
+                parameters: vec!["a".to_string(), "b".to_string()],
+                body: Box::new(Stmt::Block(vec![
+                    Stmt::If {
+                        cond: Expr::Dyadic {
+                            operator: Operator::GreaterThan,
+                            left: Box::new(Expr::Ident("a".into())),
+                            right: Box::new(Expr::Ident("b".into()))
+                        },
+                        then: Box::new(Stmt::Expr(Expr::Ident("a".into()))),
+                        els: Box::new(Stmt::Expr(Expr::Ident("b".into())))}
+                ]))
+            },
+            Stmt::Expr(Expr::Call { callee: "max".to_string(), args: vec![Expr::Int(128), Expr::Int(64)] })
+        ]).unwrap());
+        
         assert_eq!(1, interpreter.get_stack_size());
     }
 }

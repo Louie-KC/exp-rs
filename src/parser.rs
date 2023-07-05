@@ -16,6 +16,8 @@ use crate::ast::*;
  *               | block
  *               | expression ";"
  *      print -> "print(" expression ");"
+ *    fnDeclr -> "fn" function
+ *   function -> Identifier "(" ( Identifier ( "," Identifier )* )? ")" block
  *    varDecl -> "var" Identifier ( "=" statement )? ";"
  *         if -> "if(" expression ")" block ( else block )?
  *      while -> "while" "(" expression ")" block
@@ -67,6 +69,7 @@ impl Parser {
         // println!("statement: {:?}", self.peek());
         match *self.peek() {
             Token::Print => self.print_statement(),
+            Token::Function => self.function_declaration(),
             Token::Var   => self.var_statement(),
             Token::If    => self.if_statement(),
             Token::While => self.while_statement(),
@@ -86,6 +89,43 @@ impl Parser {
         }
         self.advance();  // ;
         Stmt::Print(val.unwrap())
+    }
+
+    // Rule: fnDeclr -> "fn" function
+    fn function_declaration(&mut self) -> Stmt {
+        self.advance();  // fn
+        self.function()
+    }
+
+    // Rule: function -> Identifier "(" ( Identifier ( "," Identifier )* )? ")" block
+    fn function(&mut self) -> Stmt {
+        let name = match self.atom().unwrap() {
+            Expr::Ident(n) => n,
+            _ => panic!("Expected name identifier in function declaration")
+        };
+        if !self.matches_type(Token::LParen) {
+            panic!("Missing left parenthese on function declaration")
+        }
+        self.advance();  // LParen
+        let mut parameters: Vec<String> = vec![];
+        while !self.matches_type(Token::RParen) {
+            parameters.push(match self.atom().unwrap() {
+                Expr::Ident(n) => n,
+                _ => panic!("Expected named parameter for function declaration")
+            });
+            if self.matches_type(Token::Comma) {
+                self.advance();
+            }
+        }
+        self.advance();  // RParen
+        if parameters.len() > 255 {
+            panic!("Over 255 parameters for function {}", name)
+        }
+        if !self.matches_type(Token::LSquirly) {
+            panic!("Expect function body in function declaration. Found: {:?}", self.peek())
+        }
+        let body = self.block_statement();
+        Stmt::FnDecl { name: name, parameters: parameters, body: Box::new(body) }
     }
 
     // Rule: varDecl -> "var" Identifier ( "=" statement )? ";"
@@ -477,7 +517,7 @@ impl Parser {
                     panic!("Too many arguments for function {}", callee)
                 }
                 self.advance();  // RParen
-                Ok(Expr::Call { callee: callee, params: args })
+                Ok(Expr::Call { callee: callee, args: args })
             },
             _ => expr
         }
@@ -1077,7 +1117,7 @@ mod tests {
     fn function_calls() {
         // foo();
         assert_eq!(
-            Ok(vec![Stmt::Expr(Expr::Call { callee: "foo".into(), params: vec![] })]),
+            Ok(vec![Stmt::Expr(Expr::Call { callee: "foo".into(), args: vec![] })]),
             Parser::new(vec![T::Ident("foo".into()), T::LParen, T::RParen, T::EndLine, T::EOF]).parse()
         );
 
@@ -1085,7 +1125,7 @@ mod tests {
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Call {
                 callee: "bar".into(),
-                params: vec![Expr::Int(1)]
+                args: vec![Expr::Int(1)]
             })]),
             Parser::new(vec![T::Ident("bar".into()), T::LParen, T::Int(1), T::RParen, T::EndLine, T::EOF]).parse()
         );
@@ -1094,7 +1134,7 @@ mod tests {
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Call {
                 callee: "max".into(),
-                params: vec![Expr::Int(0), Expr::Call { callee: "foo".into(), params: vec![] }]
+                args: vec![Expr::Int(0), Expr::Call { callee: "foo".into(), args: vec![] }]
             })]),
             Parser::new(vec![T::Ident("max".into()), T::LParen,
                                 T::Int(0), T::Comma,
@@ -1106,7 +1146,7 @@ mod tests {
         assert_eq!(
             Ok(vec![Stmt::Expr(Expr::Call {
                 callee: "baz".into(),
-                params: vec![Expr::Int(1), Expr::Int(2), Expr::Int(3), Expr::Int(4)]
+                args: vec![Expr::Int(1), Expr::Int(2), Expr::Int(3), Expr::Int(4)]
             })]),
             Parser::new(vec![T::Ident("baz".into()), T::LParen,
                                 T::Int(1), T::Comma,
@@ -1114,8 +1154,66 @@ mod tests {
                                 T::Int(3), T::Comma,
                                 T::Int(4),
                              T::RParen, T::EndLine, T::EOF]).parse()
-        )
+        );
+    }
 
+    #[test]
+    fn function_declarations() {
+        // fn no_params() {
+        //     print(1);
+        // }
+        assert_eq!(
+            Ok(vec![Stmt::FnDecl {
+                name: "no_params".into(),
+                parameters: vec![],
+                body: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(1))]))
+            }]),
+            Parser::new(vec![T::Function, T::Ident("no_params".into()), T::LParen, T::RParen, T::LSquirly,
+                            T::Print, T::LParen, T::Int(1), T::RParen, T::EndLine, T::RSquirly, T::EOF]).parse()
+        );
+
+        // fn one_param(abc) {
+        //     print(abc);
+        // }
+        assert_eq!(
+            Ok(vec![Stmt::FnDecl {
+                name: "one_param".into(),
+                parameters: vec!["abc".into()],
+                body: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Ident("abc".into()))]))
+            }]),
+            Parser::new(vec![T::Function, T::Ident("one_param".into()), T::LParen, T::Ident("abc".into()), T::RParen,
+                             T::LSquirly, T::Print, T::LParen, T::Ident("abc".into()), T::RParen, T::EndLine,
+                             T::RSquirly, T::EOF]).parse()
+        );
+
+        // fn multi_param(abc, def) {
+        //     abc = abc + def;
+        //     print(abc);
+        // }
+        assert_eq!(
+            Ok(vec![Stmt::FnDecl {
+                name: "multi_param".into(),
+                parameters: vec!["abc".into(), "def".into()],
+                body: Box::new(Stmt::Block(vec![
+                    Stmt::Expr(Expr::Assign {
+                        var_name: "abc".into(),
+                        new_value: Box::new(Expr::Dyadic {
+                            operator: Operator::Plus,
+                            left: Box::new(Expr::Ident("abc".into())),
+                            right: Box::new(Expr::Ident("def".into()))
+                        })
+                    }),
+                    Stmt::Print(Expr::Ident("abc".into()))
+                ]))
+            }]),
+            Parser::new(vec![T::Function, T::Ident("multi_param".into()), T::LParen,
+                                T::Ident("abc".into()), T::Comma, T::Ident("def".into()),
+                             T::RParen, T::LSquirly,
+                                T::Ident("abc".into()), T::Equal, T::Ident("abc".into()), T::Plus,
+                                        T::Ident("def".into()), T::EndLine,
+                                T::Print, T::LParen, T::Ident("abc".into()), T::RParen, T::EndLine,
+                             T::RSquirly, T::EOF]).parse()
+        );
     }
 
 }

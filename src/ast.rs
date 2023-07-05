@@ -12,7 +12,12 @@ pub enum Stmt {
         body: Box<Stmt>
     },
     Block(Vec<Stmt>),
-    VarDecl(String, Option<Box<Stmt>>)
+    VarDecl(String, Option<Box<Stmt>>),
+    FnDecl{
+        name: String,
+        parameters: Vec<String>,
+        body: Box<Stmt>
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -57,6 +62,6 @@ pub enum Expr {
     },
     Call {
         callee: String,
-        params: Vec<Expr>
+        args: Vec<Expr>
     }
 }
