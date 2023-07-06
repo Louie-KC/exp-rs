@@ -17,31 +17,52 @@ impl Function {
 }
 
 struct Environment {
-    variables: HashMap<String, i32>,
-    functions: HashMap<String, Function>
+    functions: HashMap<String, Function>,
+    variables: HashMap<String, i32>
 }
 
 impl Environment {
     fn new() -> Self {
-        Self { variables: HashMap::new(), functions: HashMap::new() }
+        Self { functions: HashMap::new(), variables: HashMap::new() }
     }
+
+    fn declare_function(&mut self, name: &String, func: Function) -> () {
+        if self.functions.contains_key(name) {
+            panic!("function \"{}\" already declared in scope", name)
+        }
+        self.functions.insert(name.into(), func);
+    }
+
+    fn get_function(&self, name: &String) -> Option<&Function> {
+        self.functions.get(name)
+    }
+
+    fn get_var(&self, name: &String) -> Option<&i32> {
+        self.variables.get(name)
+    }
+
+    fn set_var(&mut self, name: &String, value: i32) -> () {
+        self.variables.insert(name.into(), value);
+    }
+
 }
 
 pub struct Interpreter {
-    // env_stack: Vec<HashMap<String, i32>>
     env_stack: Vec<Environment>
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        // Self { env_stack: vec![HashMap::new()] }
         Self { env_stack: vec![Environment::new()] }
     }
     
     pub fn interpret(&mut self, statements: &Vec<Stmt>) -> Result<i32, String> {
         let mut result = 0;  // Program exits with status code (default of 0)
         for statement in statements {
-            result = self.evaluate_stmt(&statement)?;
+            result = match self.evaluate_stmt(&statement) {
+                Ok(r) => r,
+                Err(e) => return Err(e)
+            };
         }
         Ok(result)
     }
@@ -52,19 +73,20 @@ impl Interpreter {
     
     fn evaluate_stmt(&mut self, stmt: &Stmt) -> Result<i32, String> {
         // println!("Evaluating: {:?}", stmt);
-        let result = match stmt {
+        match stmt {
             Stmt::Print(expr) => {
                 let result = self.evalulate_expr(expr);
-                println!("{:?}", result.unwrap());
-                0
+                println!("{:?}", result);
+                Ok(0)
             },
             Stmt::Expr(expr) => {
-                self.evalulate_expr(expr)?
+                self.evalulate_expr(expr)
             },
             Stmt::If {cond, then, els} => {
-                match self.evalulate_expr(cond).unwrap() {
-                    0 => self.interpret_one(then).unwrap(),
-                    _ => self.interpret_one(els).unwrap()
+                match self.evalulate_expr(cond) {
+                    Ok(0) => self.interpret_one(then),
+                    Ok(_) => self.interpret_one(els),
+                    _     => return Err(format!("Could not evaluate if condition: {:?}", cond))
                 }
             },
             Stmt::While { cond, body } => {
@@ -72,134 +94,147 @@ impl Interpreter {
                 while self.evalulate_expr(cond)? == 0 {
                     result = self.interpret_one(&body)?
                 }
-                result
+                Ok(result)
             },
             Stmt::Block(body) => {
                 let needs_own_env = self.block_needs_stack(&body);
                 if needs_own_env {
                     self.env_stack.push(Environment::new());
                 }
-                let result = self.interpret(body).unwrap();
-                if needs_own_env {
+                let result = self.interpret(body);
+                if needs_own_env && self.env_stack.len() > 1 {
                     self.env_stack.pop();
                 }
                 result
             },
             Stmt::VarDecl(ident, value) => {
                 if self.current_env_has(ident.into()) {
-                    panic!("Variable \"{}\" already declared in current scope", ident)
+                    return Err(format!("Variable \"{}\" already declared in current scope", ident))
                 }
                 let val = match value {
                     Some(v) => self.evaluate_stmt(v).unwrap(),
                     None => 0
                 };
                 self.add_var(ident.into(), val);
-                0
+                Ok(0)
             },
             Stmt::FnDecl { name, parameters, body } => {
-                let fn_env = &mut self.env_stack.last_mut().unwrap().functions;
-                if fn_env.contains_key(name) {
-                    panic!("function \"{}\" already declared in scope", name)
+                let env = match self.env_stack.last_mut() {
+                    Some(e) => e,
+                    None => return Err("All environments have been cleared".into())
+                };
+                if env.get_function(name).is_some() {
+                    return Err(format!("function \"{}\" already declared in scope", name))
                 }
-                let function = Function::new(parameters.clone(), *body.clone());
-                fn_env.insert(name.into(), function);
-                0
+                let func = Function::new(parameters.to_owned(), *body.to_owned());
+                env.declare_function(name, func);
+                Ok(0)
             },
-        };
-        Ok(result)
+        }
     }
                  
     fn evalulate_expr(&mut self, expr: &Expr) -> Result<i32, String> {
         // println!("evaluate_expr: {:?}", expr);
-        let result: i32 = match expr {
-            Expr::Int(n)   => *n,
-            Expr::Boolean(true)  => 0,
-            Expr::Boolean(false) => 1,
+        match expr {
+            Expr::Int(n)   => Ok(*n),
+            Expr::Boolean(true)  => Ok(0),
+            Expr::Boolean(false) => Ok(1),
             Expr::Ident(s) => {
                 match self.get_var(s).cloned() {
-                    Some(val) => val,
-                    None => return Err(format!("Undefined variable {}", s))
+                    Some(val) => Ok(val),
+                    None => Err(format!("Undefined variable {}", s))
                 }
             },
             Expr::Monadic { operator, operand } => {
-                let next = self.evalulate_expr(operand)?;
+                let operand_value = match self.evalulate_expr(operand) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e)
+                };
                 match operator {
-                    Operator::Plus => next,
-                    Operator::Minus => -next,
-                    _ => {
-                        return Err(format!("Bad operator: {:?} onto {}", operator, next))
-                    }
+                    Operator::Plus => Ok(operand_value),
+                    Operator::Minus => Ok(-operand_value),
+                    _ => Err(format!("Bad operator: {:?} onto {}", operator, operand_value))
                 }
             },
             Expr::Dyadic { operator, left, right } => {
-                let lhs = self.evalulate_expr(left)?;
+                let lhs = match self.evalulate_expr(left) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e)
+                };
                 let rhs = self.evalulate_expr(right)?;
                 match operator {
-                    Operator::Plus    => lhs + rhs,
-                    Operator::Minus   => lhs - rhs,
-                    Operator::Star    => lhs * rhs,
-                    Operator::Slash   => lhs / rhs,
-                    Operator::Modulo  => lhs % rhs,
-                    Operator::EqualTo       => if lhs == rhs {0} else {1},
-                    Operator::NotEqualTo    => if lhs != rhs {0} else {1},
-                    Operator::LessThan      => if lhs <  rhs {0} else {1},
-                    Operator::LessEquals    => if lhs <= rhs {0} else {1},
-                    Operator::GreaterThan   => if lhs >  rhs {0} else {1},
-                    Operator::GreaterEquals => if lhs >= rhs {0} else {1},
+                    Operator::Plus    => Ok(lhs + rhs),
+                    Operator::Minus   => Ok(lhs - rhs),
+                    Operator::Star    => Ok(lhs * rhs),
+                    Operator::Slash   => Ok(lhs / rhs),
+                    Operator::Modulo  => Ok(lhs % rhs),
+                    Operator::EqualTo       => if lhs == rhs {Ok(0)} else {Ok(1)},
+                    Operator::NotEqualTo    => if lhs != rhs {Ok(0)} else {Ok(1)},
+                    Operator::LessThan      => if lhs <  rhs {Ok(0)} else {Ok(1)},
+                    Operator::LessEquals    => if lhs <= rhs {Ok(0)} else {Ok(1)},
+                    Operator::GreaterThan   => if lhs >  rhs {Ok(0)} else {Ok(1)},
+                    Operator::GreaterEquals => if lhs >= rhs {Ok(0)} else {Ok(1)},
                     Operator::LogicalAnd
-                    | Operator::LogicalOr   => panic!("Logical operation in Dyadic expression"),
+                    | Operator::LogicalOr   => Err("Logical operation in Dyadic expression".into()),
                 }
             },
             Expr::Logical { operator, left, right } => {
                 let lhs = self.evalulate_expr(left)?;
                 match (lhs, operator) {  // short circuit eval
-                    (1, Operator::LogicalAnd)  => lhs,
-                    (0, Operator::LogicalOr)   => lhs,
+                    (1, Operator::LogicalAnd)  => Ok(1),
+                    (0, Operator::LogicalOr)   => Ok(0),
                     (_, Operator::LogicalAnd)
-                    | (_, Operator::LogicalOr) => self.evalulate_expr(right)?,
-                    _ => panic!("Non-logical operator in Logical expression")
+                    | (_, Operator::LogicalOr) => self.evalulate_expr(right),
+                    _ => Err("Non-logical operator in Logical expression".into())
                 }
 
             }
             Expr::Assign { var_name, new_value } => {
-                let val = self.evalulate_expr(new_value)?;
-                match self.get_var(var_name) {
-                    Some(_) => self.update_var(var_name.into(), val),
-                    None    => panic!("Cannot assign to {} as it is not declared", var_name),
+                if self.get_var(var_name).is_none() {
+                    return Err(format!("Cannot assign value to {} as it is not declared", var_name))
+                }
+                let val: i32 = match self.evalulate_expr(new_value) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e)
                 };
-                val
+                self.update_var(var_name, val);
+                Ok(val)
             },
             Expr::Call { callee, args } => {
-                let mut function: Option<&Function> = None;
-                for env in self.env_stack.iter().rev() {
-                    function = env.functions.get(callee);
-                    if function.is_some() {
-                        break;
-                    }
+                // Search for environment with callee starting from inner most environment/scope
+                let env = self.env_stack.iter()
+                    .rev()
+                    .find(|e| e.get_function(callee).is_some());
+                if env.is_none() {
+                    return Err(format!("Undefined function \"{}\" was called", callee))
                 }
-                let (param_names, body) = (function.unwrap().params.clone(), function.unwrap().body.clone());
-
-                if param_names.len() != args.len() {
-                    panic!("Incorrect number of parameter arguments")
+                // unwrapping env safe per above
+                let function = match env.unwrap().get_function(callee) {
+                    Some(f) => f,
+                    None => return Err(format!("Undefined function \"{}\" was called", callee))
+                };
+                let params = &function.params;
+                if params.len() != args.len() {
+                    return Err(format!("{}: Expected {} args but found {}",
+                        callee, params.len(), args.len()))
                 }
 
-                let mut block: Vec<Stmt> = param_names.into_iter()
+                let mut block: Vec<Stmt> = params.into_iter()
                     .enumerate()
-                    .map(|(i, n)| Stmt::VarDecl(n.into(), Some(Box::new(Stmt::Expr(args.get(i).unwrap().clone())))))
-                    .collect();
+                    .map(|(i, n)| {
+                        let arg: Stmt = match args.get(i) {
+                            Some(val) => Stmt::Expr(val.clone()),
+                            None => panic!("Could not evaluate parameter {} of {} call", i, callee)
+                        };
+                        Stmt::VarDecl(n.into(), Some(Box::new(arg)))
+                    })
+                    .collect::<Vec<Stmt>>();
 
-                block.push(body);
+                block.push(function.body.clone());
 
-                self.evaluate_stmt(&Stmt::Block(block)).unwrap()
-                
-                // 0
+                self.evaluate_stmt(&Stmt::Block(block))
             },
-        };
-        Ok(result)
-    }
-
-    fn get_stack_size(&self) -> usize {
-        self.env_stack.len()
+        }
     }
 
     /// Determines whether a block statement needs its own variable environment added onto the
@@ -222,7 +257,7 @@ impl Interpreter {
         let mut result = None;
         // Begin outward search from inner most scope
         for env in self.env_stack.iter().rev() {
-            result = env.variables.get(name);
+            result = env.get_var(name);
             if result.is_some() { break; }
         }
         result
@@ -231,12 +266,11 @@ impl Interpreter {
     /// Determines whether a variable with the parameter 'name' already exists
     /// in the current/inner-most scope.
     fn current_env_has(&self, name: &String) -> bool {
-        // println!("current_env_has:");
-        // dbg!(self.env_stack.clone());
-        match self.env_stack.last().unwrap().variables.get(name) {
-            Some(_) => true,
-            None    => false
-        }
+        let env = match self.env_stack.last() {
+            Some(e) => e,
+            None => panic!("All environments have been cleared")
+        };
+        env.get_var(name).is_some()
     }
 
     /// Updates the value of an existing variable with the 'name' parameter.
@@ -244,8 +278,8 @@ impl Interpreter {
     /// scope.
     fn update_var(&mut self, name: &String, value: i32) -> () {
         for env in self.env_stack.iter_mut().rev() {
-            if env.variables.contains_key(name) {
-                env.variables.insert(name.into(), value);
+            if env.get_var(name).is_some() {
+                env.set_var(name, value);
                 return;
             }
         }
@@ -255,9 +289,14 @@ impl Interpreter {
     /// Adds/declares a variable with the value to the current or inner most scope.
     fn add_var(&mut self, name: &String, value: i32) -> () {
         match self.env_stack.last_mut() {
-            Some(env) => { env.variables.insert(name.into(), value); },
+            Some(env) => env.set_var(name, value),
             None    => panic!("All enviroments have been cleared")
         }
+    }
+
+    #[allow(dead_code)]  // used for tests
+    fn get_stack_size(&self) -> usize {
+        self.env_stack.len()
     }
 }
 
@@ -270,24 +309,24 @@ mod tests {
     fn basic_calculation() {
         let mut interpreter = Interpreter::new();
 
-        assert_eq!(0, interpreter.interpret_one(&Stmt::Expr(Expr::Int(0))).unwrap());  // 0
-        assert_eq!(1, interpreter.interpret_one(&Stmt::Expr(  // +1
+        assert_eq!(Ok(0), interpreter.interpret_one(&Stmt::Expr(Expr::Int(0))));  // 0
+        assert_eq!(Ok(1), interpreter.interpret_one(&Stmt::Expr(  // +1
             Expr::Monadic {
                 operator: Operator::Plus,
                 operand: Box::new(Expr::Int(1))
-            })).unwrap());
-        assert_eq!(-1, interpreter.interpret_one(&Stmt::Expr(  // -1
+            })));
+        assert_eq!(Ok(-1), interpreter.interpret_one(&Stmt::Expr(  // -1
             Expr::Monadic {
                 operator: Operator::Minus,
                 operand: Box::new(Expr::Int(1))
-            })).unwrap());
-        assert_eq!(256, interpreter.interpret_one(&Stmt::Expr(  // 192 + 64
+            })));
+        assert_eq!(Ok(256), interpreter.interpret_one(&Stmt::Expr(  // 192 + 64
             Expr::Dyadic {
                 operator: Operator::Plus,
                 left: Box::new(Expr::Int(192)),
                 right: Box::new(Expr::Int(64))
-            })).unwrap());
-        assert_eq!(-8, interpreter.interpret_one(&Stmt::Expr(  // 16 / 4 * -2
+            })));
+        assert_eq!(Ok(-8), interpreter.interpret_one(&Stmt::Expr(  // 16 / 4 * -2
             Expr::Dyadic {
                 operator: Operator::Star,
                 left: Box::new(Expr::Dyadic {
@@ -299,7 +338,7 @@ mod tests {
                     operator: Operator::Minus,
                     operand: Box::new(Expr::Int(2))
                 })
-            })).unwrap());
+            })));
     }
 
     #[test]
@@ -310,36 +349,51 @@ mod tests {
         assert_eq!(Err("Undefined variable my_var".into()),
                    interpreter.interpret_one(&Stmt::Expr(Expr::Ident("my_var".into()))));
 
+        // undefined_var = 1;
+        assert_eq!(Err("Cannot assign value to undefined_var as it is not declared".into()),
+            interpreter.interpret_one(&Stmt::Expr(Expr::Assign {
+                var_name: "undefined_var".into(),
+                new_value: Box::new(Expr::Int(1))
+        })));
+
+        // var defined_twice;
+        // var defined_twice;
+        assert_eq!(Err("Variable \"defined_twice\" already declared in current scope".into()),
+            interpreter.interpret(&vec![
+                Stmt::VarDecl("defined_twice".into(), None),
+                Stmt::VarDecl("defined_twice".into(), None)
+            ]));
+
         // var not_initialised;
         // not_initialised;
-        assert_eq!(0, interpreter.interpret(&vec![
+        assert_eq!(Ok(0), interpreter.interpret(&vec![
             Stmt::VarDecl("not_initialised".into(), None),
             Stmt::Expr(Expr::Ident("not_initialised".into()))
-        ]).unwrap());
+        ]));
 
         // var tomato = 127;
         // tomato;
-        assert_eq!(127, interpreter.interpret(&vec![
+        assert_eq!(Ok(127), interpreter.interpret(&vec![
             Stmt::VarDecl("tomato".into(), Some(Box::new(Stmt::Expr(Expr::Int(127))))),
             Stmt::Expr(Expr::Ident("tomato".into()))
-        ]).unwrap());
+        ]));
 
         // var c = if (false) { 1; } else { 1023; };
         // c;
-        assert_eq!(1023, interpreter.interpret(&vec![
+        assert_eq!(Ok(1023), interpreter.interpret(&vec![
             Stmt::VarDecl("c".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(false),
                 then: Box::new(Stmt::Expr(Expr::Int(1))),
                 els: Box::new(Stmt::Expr(Expr::Int(1023)))
             }))),
             Stmt::Expr(Expr::Ident("c".into()))
-        ]).unwrap());
+        ]));
 
         // var a = 10;
         // var b = 20;
         // a = a + b;
         // a;
-        assert_eq!(30, interpreter.interpret(&vec![
+        assert_eq!(Ok(30), interpreter.interpret(&vec![
             Stmt::VarDecl("a".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
             Stmt::VarDecl("b".into(), Some(Box::new(Stmt::Expr(Expr::Int(20))))),
             Stmt::Expr(Expr::Assign {
@@ -351,7 +405,7 @@ mod tests {
                 })
             }),
             Stmt::Expr(Expr::Ident("a".into()))
-        ]).unwrap());
+        ]));
     }
 
     #[test]
@@ -359,7 +413,7 @@ mod tests {
         let mut interpreter = Interpreter::new();
 
         // if (256 == 256) { 1; } else { 2; }
-        assert_eq!(1, interpreter.interpret(
+        assert_eq!(Ok(1), interpreter.interpret(
             &vec![
                 Stmt::If {
                     cond: Expr::Dyadic {
@@ -370,10 +424,10 @@ mod tests {
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
                 }]
-        ).unwrap());
+        ));
 
         // if (512 != 512) { 1; } else { 2; }
-        assert_eq!(2, interpreter.interpret(
+        assert_eq!(Ok(2), interpreter.interpret(
             &vec![
                 Stmt::If {
                     cond: Expr::Dyadic {
@@ -384,10 +438,10 @@ mod tests {
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
                 }]
-        ).unwrap());
+        ));
 
         // if (512 == 2048) { 11; }  // Default output of 0 without any statements
-        assert_eq!(0, interpreter.interpret(
+        assert_eq!(Ok(0), interpreter.interpret(
             &vec![
                 Stmt::If {
                     cond: Expr::Dyadic {
@@ -398,13 +452,13 @@ mod tests {
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(11))])),
                     els: Box::new(Stmt::Block(vec![]))
                 }]
-        ).unwrap());
+        ));
         
         // var a = 5;
         // var b = 50;
         // var max = if (a > b) { a; } else { b; };
         // max;
-        assert_eq!(50, interpreter.interpret(
+        assert_eq!(Ok(50), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("a".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
                 Stmt::VarDecl("b".into(), Some(Box::new(Stmt::Expr(Expr::Int(50))))),
@@ -419,10 +473,10 @@ mod tests {
                 }))),
                 Stmt::Expr(Expr::Ident("max".into()))
                 ]
-        ).unwrap());
+        ));
 
         // if (true && true) { 1; } else { 2; }
-        assert_eq!(1, interpreter.interpret(
+        assert_eq!(Ok(1), interpreter.interpret(
             &vec![
                 Stmt::If {
                     cond: Expr::Logical {
@@ -433,10 +487,10 @@ mod tests {
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
                 }]
-        ).unwrap());
+        ));
 
         // if (true && false) { 1; } else { 2; }
-        assert_eq!(2, interpreter.interpret(
+        assert_eq!(Ok(2), interpreter.interpret(
             &vec![
                 Stmt::If {
                     cond: Expr::Logical {
@@ -447,7 +501,7 @@ mod tests {
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
                     els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
                 }]
-        ).unwrap());
+        ));
 
     }
 
@@ -459,7 +513,7 @@ mod tests {
         // var flag_one = false;  // true = 0, false = 1
         // if (false && flag_one = true) {}
         // flag_one;  // should remain as false/1
-        assert_eq!(1, interpreter.interpret(
+        assert_eq!(Ok(1), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("flag_one".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
@@ -476,13 +530,13 @@ mod tests {
                 },
                 Stmt::Expr(Expr::Ident("flag_one".into()))
             ]
-        ).unwrap());
+        ));
 
         // // Short circuit evaluation
         // var flag_two = false;  // true = 0, false = 1
         // if (true || flag_two = true) {}
         // flag_two;  // should remain as false/1
-        assert_eq!(1, interpreter.interpret(
+        assert_eq!(Ok(1), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("flag_two".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
@@ -499,7 +553,7 @@ mod tests {
                 },
                 Stmt::Expr(Expr::Ident("flag_two".into()))
             ]
-        ).unwrap());
+        ));
     }
 
     #[test]
@@ -511,7 +565,7 @@ mod tests {
         //     i = i + 1;
         // }
         // i;
-        assert_eq!(5, interpreter.interpret(
+        assert_eq!(Ok(5), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("i".into(), Some(Box::new(Stmt::Expr(Expr::Int(0))))),
             Stmt::While {
@@ -532,7 +586,7 @@ mod tests {
             },
             Stmt::Expr(Expr::Ident("i".into()))
             ]
-        ).unwrap());
+        ));
     }
 
     #[test]
@@ -562,7 +616,7 @@ mod tests {
         //     toast = toast + 1;  // should not modify `toast` declared on the first line
         // }
         // toast;
-        assert_eq!(5, interpreter.interpret(&vec![
+        assert_eq!(Ok(5), interpreter.interpret(&vec![
             Stmt::VarDecl("toast".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
             Stmt::If {
                 cond: Expr::Boolean(true),
@@ -577,7 +631,7 @@ mod tests {
                 els: Box::new(Stmt::Block(vec![]))
             },
             Stmt::Expr(Expr::Ident("toast".into()))
-        ]).unwrap());
+        ]));
 
         // var abc = 5;
         // var result = if (true) {
@@ -585,7 +639,7 @@ mod tests {
         //     abc;  // Should refer to the var `abc` declared in the line above
         // }
         // result;
-        assert_eq!(10, interpreter.interpret(&vec![
+        assert_eq!(Ok(10), interpreter.interpret(&vec![
             Stmt::VarDecl("abc".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
             Stmt::VarDecl("result".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(true),
@@ -596,7 +650,7 @@ mod tests {
                 els: Box::new(Stmt::Block(vec![]))
             }))),
             Stmt::Expr(Expr::Ident("result".into()))
-        ]).unwrap());
+        ]));
 
         // var abcd = 5;
         // var output = if (false) {
@@ -608,7 +662,7 @@ mod tests {
         //    abcd;  // should refer to `abcd` declared in the two lines above
         // }
         // output;
-        assert_eq!(6, interpreter.interpret(&vec![
+        assert_eq!(Ok(6), interpreter.interpret(&vec![
             Stmt::VarDecl("abcd".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
             Stmt::VarDecl("output".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(false),
@@ -630,7 +684,7 @@ mod tests {
                 ]))
             }))),
             Stmt::Expr(Expr::Ident("output".into()))
-        ]).unwrap());
+        ]));
 
         // var abcde = 5;
         // var ignored = if (true) {
@@ -638,7 +692,7 @@ mod tests {
         //     abcde;  // Should refer to the var `abcde` declared in the line above
         // }
         // abcde;  // original abcde from the first line
-        assert_eq!(5, interpreter.interpret(&vec![
+        assert_eq!(Ok(5), interpreter.interpret(&vec![
             Stmt::VarDecl("abcde".into(), Some(Box::new(Stmt::Expr(Expr::Int(5))))),
             Stmt::VarDecl("ignored".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(true),
@@ -649,7 +703,7 @@ mod tests {
                 els: Box::new(Stmt::Block(vec![]))
             }))),
             Stmt::Expr(Expr::Ident("abcde".into()))
-        ]).unwrap());
+        ]));
 
         assert_eq!(1, interpreter.get_stack_size());
     }
@@ -658,12 +712,19 @@ mod tests {
     fn functions() {
         let mut interpreter = Interpreter::new();
 
+        // mystery();
+        assert_eq!(Err("Undefined function \"mystery\" was called".into()),
+            interpreter.interpret(&vec![
+                Stmt::Expr(Expr::Call { callee: "mystery".into(), args: vec![] })
+            ])
+        );
+
         // fn abs(n) {
         //     if (n < 0) { n = n * -1; }
         //     n;
         // }
         // abs(-5);
-        assert_eq!(5, interpreter.interpret(&vec![
+        assert_eq!(Ok(5), interpreter.interpret(&vec![
             Stmt::FnDecl {
                 name: "abs".into(),
                 parameters: vec!["n".to_string()],
@@ -694,7 +755,7 @@ mod tests {
                 callee: "abs".into(),
                 args: vec![Expr::Int(-5)]
             })
-        ]).unwrap());
+        ]));
 
         // fn max(a, b) {
         //     if (a > b) {
@@ -704,7 +765,7 @@ mod tests {
         //     }
         // }
         // max(128, 64);
-        assert_eq!(128, interpreter.interpret(&vec![
+        assert_eq!(Ok(128), interpreter.interpret(&vec![
             Stmt::FnDecl {
                 name: "max".into(),
                 parameters: vec!["a".to_string(), "b".to_string()],
@@ -720,7 +781,7 @@ mod tests {
                 ]))
             },
             Stmt::Expr(Expr::Call { callee: "max".to_string(), args: vec![Expr::Int(128), Expr::Int(64)] })
-        ]).unwrap());
+        ]));
         
         assert_eq!(1, interpreter.get_stack_size());
     }
