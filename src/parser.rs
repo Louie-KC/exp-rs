@@ -3,6 +3,23 @@ use std::mem::{discriminant};
 use crate::tokens::{Token, self};
 use crate::ast::*;
 
+macro_rules! result_ok_or_err {
+    ($eval:expr) => {
+        match $eval {
+            Ok(value)  => value,
+            Err(error) => return Err(error)
+        }
+    };
+}
+
+macro_rules! return_err_if_err {
+    ($eval:expr) => {
+        if let Err(e) = $eval {
+            return Err(e)
+        }
+    };
+}
+
 /*
  * Recursive Descent
  * 
@@ -58,14 +75,13 @@ impl Parser {
         let mut statements: Vec<Stmt> = Vec::new();
 
         while *self.peek() != Token::EOF {
-            // println!("parse: {:?}", self.peek());
-            statements.push(self.statement());
+            statements.push(result_ok_or_err!(self.statement()));
         }
 
         Ok(statements)
     }
 
-    fn statement(&mut self) -> Stmt {
+    fn statement(&mut self) -> Result<Stmt, String> {
         // println!("statement: {:?}", self.peek());
         match *self.peek() {
             Token::Print => self.print_statement(),
@@ -80,35 +96,32 @@ impl Parser {
     }
 
     // Rule: print -> "print(" expression ");"
-    fn print_statement(&mut self) -> Stmt {
+    fn print_statement(&mut self) -> Result<Stmt, String> {
         self.advance();  // Print
-        let val: Expr = match self.expression() {
-            Ok(e) => e,
-            Err(e) => panic!("{}", e)
-        };
-        self.consume_and_advance(Token::EndLine, "Expected \";\" to end print statement");
-        Stmt::Print(val)
+        let val: Expr = result_ok_or_err!(self.expression());
+        return_err_if_err!(self.consume(Token::EndLine, "Expected \";\" to end print statement"));
+        Ok(Stmt::Print(val))
     }
 
     // Rule: fnDeclr -> "fn" function
-    fn function_declaration(&mut self) -> Stmt {
+    fn function_declaration(&mut self) -> Result<Stmt, String> {
         self.advance();  // fn
         self.function()
     }
 
     // Rule: function -> Identifier "(" ( Identifier ( "," Identifier )* )? ")" block
-    fn function(&mut self) -> Stmt {
+    fn function(&mut self) -> Result<Stmt, String> {
         let name = match self.atom() {
             Ok(Expr::Ident(n)) => n,
-            _ => panic!("Expected name identifier in function declaration")
+            _ => return Err("Expected name identifier in function declaration".into())
         };
-        self.consume_and_advance(Token::LParen, "Missing \"(\" on function declaration");
+        return_err_if_err!(self.consume(Token::LParen, "Missing \"(\" on function declaration"));
 
         let mut parameters: Vec<String> = vec![];
         while !self.matches_type(Token::RParen) {
             parameters.push(match self.atom() {
                 Ok(Expr::Ident(n)) => n,
-                _ => panic!("Expected named parameter for function declaration")
+                _ => return Err("Expected named parameter for function declaration".into())
             });
             if self.matches_type(Token::Comma) {
                 self.advance();
@@ -116,31 +129,31 @@ impl Parser {
         }
         self.advance();  // RParen
         if parameters.len() > 255 {
-            panic!("Over 255 parameters for function {}", name)
+            return Err(format!("Over 255 parameters for function {}", name))
         }
         if !self.matches_type(Token::LSquirly) {
-            panic!("Expect function body in function declaration. Found: {:?}", self.peek())
+            return Err(format!("Expect function body in function declaration. Found: {:?}", self.peek()))
         }
-        let body: Stmt = self.block_statement();
-        Stmt::FnDecl { name: name, parameters: parameters, body: Box::new(body) }
+        let body: Stmt = result_ok_or_err!(self.block_statement());
+        Ok(Stmt::FnDecl { name: name, parameters: parameters, body: Box::new(body) })
     }
 
     // Rule: varDecl -> "var" Identifier ( "=" statement )? ";"
-    fn var_statement(&mut self) -> Stmt {
+    fn var_statement(&mut self) -> Result<Stmt, String> {
         self.advance();  // var
         if !self.matches_type(Token::Ident("".into())) {
-            panic!("Expected identifier after \"var\"");
+            return Err("Expected identifier after \"var\"".into());
         }
         let ident: String = self.get_var_name();
         self.advance();
         let value = match self.peek() {
             Token::Equal => {
                 self.advance();  // =
-                let deterministic = self.matches_type(Token::If);
-                let v = self.statement();
+                let deterministic: bool = self.matches_type(Token::If);
+                let v: Stmt = result_ok_or_err!(self.statement());
                 match (deterministic, self.matches_type(Token::EndLine)) {
                     (true, true)  => self.advance(),
-                    (true, false) => panic!("Expected ; after var declaration"),
+                    (true, false) => return Err("Expected ; after var declaration".into()),
                     _        => {}
                 }
                 Some(Box::new(v))
@@ -149,9 +162,9 @@ impl Parser {
                 self.advance();  // ;
                 None
             },
-            _ => panic!("Expected \";\" or value to end variable declaration")
+            _ => return Err("Expected \";\" or value to end variable declaration".into())
         };
-        Stmt::VarDecl(ident.into(), value)
+        Ok(Stmt::VarDecl(ident.into(), value))
     }
 
     fn get_var_name(&self) -> String {
@@ -163,43 +176,39 @@ impl Parser {
     }
 
     // Rule: if -> "if(" expression ")" block ( else block )?
-    fn if_statement(&mut self) -> Stmt {
+    fn if_statement(&mut self) -> Result<Stmt, String> {
         self.advance();  // if
-        self.consume_and_advance(Token::LParen, "Expected \"(\" after if");
+        return_err_if_err!(self.consume(Token::LParen, "Expected \"(\" after if"));
 
-        let cond: Expr = match self.expression() {
-            Ok(e) => e,
-            Err(e) => panic!("{}", e)
-        };
+        let cond: Expr = result_ok_or_err!(self.expression());
         
-        self.consume_and_advance(Token::RParen, "Expected \")\" after if condition");
+        return_err_if_err!(self.consume(Token::RParen, "Expected \")\" after if condition"));
 
-        let then: Stmt = self.statement();
+        let then: Stmt = result_ok_or_err!(self.statement());
         let els: Stmt = if self.matches_type(Token::Else) {
             self.advance();  // else
-            self.statement()
+            result_ok_or_err!(self.statement())
         } else {
             Stmt::Block(vec![])
         };
-        Stmt::If{ cond: cond, then: Box::new(then), els: Box::new(els)}
+        Ok(Stmt::If{ cond: cond, then: Box::new(then), els: Box::new(els)})
     }
 
     // Rule: while -> "while(" expression ")" block
-    fn while_statement(&mut self) -> Stmt {
+    fn while_statement(&mut self) -> Result<Stmt, String> {
         self.advance();  // while
         self.advance();  // LParen
-        let cond: Expr = match self.expression() {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e)
-        };
-        self.consume_and_advance(Token::RParen, "Expected \")\" after while condition");
 
-        let body: Stmt = self.block_statement();
-        Stmt::While { cond: cond, body: Box::new(body) }
+        let cond: Expr = result_ok_or_err!(self.expression());
+        // self.consume(Token::RParen, "Expected \")\" after while condition");
+        return_err_if_err!(self.consume(Token::RParen, "Expected \")\" after while condition"));
+
+        let body = result_ok_or_err!(self.block_statement());
+        Ok(Stmt::While { cond: cond, body: Box::new(body) })
     }
 
     // Rule: for -> "for" "(" ( varDeclr | expression )? ";" expression? ";" expression ")" block
-    fn for_statement(&mut self) -> Stmt {
+    fn for_statement(&mut self) -> Result<Stmt, String> {
         self.advance(); // for
         self.advance(); // LParen
 
@@ -208,33 +217,27 @@ impl Parser {
                 self.advance();
                 None
             },
-            _ => Some(self.statement())
+            _ => Some(result_ok_or_err!(self.statement()))
         };
 
         let cond = match self.peek() {
             Token::EndLine => Expr::Boolean(true),
-            _ => match self.expression() {
-                Ok(e) => e,
-                Err(e) => panic!("{}", e)
-            }
+            _ => result_ok_or_err!(self.expression())
         };
         self.advance();  // ;
 
         let step = match self.peek() {
             Token::RParen => None,
-            _ => match self.expression() {
-                Ok(e) => Some(e),
-                Err(e) => panic!("{}", e)
-            }
+            _ => Some(result_ok_or_err!(self.expression()))
         };
 
         // println!("{:?}, {:?}, {:?}", init, cond, step);
-        self.consume_and_advance(Token::RParen, "Expected \"(\" to close loop condition");
+        return_err_if_err!(self.consume(Token::RParen, "Expected \"(\" to close loop condition"));
 
         // assembling
         let mut loop_body = match self.block_statement() {
-            Stmt::Block(stmts) => stmts,
-            _ => panic!("For loop expected a body of block statement")
+            Ok(Stmt::Block(stmts)) => stmts,
+            _ => return Err("For loop expected a body of block statement".into())
         };
         if let Some(step_expr) = step {
             loop_body.push(Stmt::Expr(step_expr));
@@ -244,34 +247,31 @@ impl Parser {
             body: Box::new(Stmt::Block(loop_body))
         };
         match init {
-            Some(init_stmt) => Stmt::Block(vec![init_stmt, main_loop]),
-            None => main_loop
+            Some(init_stmt) => Ok(Stmt::Block(vec![init_stmt, main_loop])),
+            None => Ok(main_loop)
         }
     }
 
     // Rule: block -> "{" statement* "}"
-    fn block_statement(&mut self) -> Stmt {
+    fn block_statement(&mut self) -> Result<Stmt, String> {
         self.advance();  // {
         let mut peek = self.peek();
         let mut statements:Vec<Stmt> = Vec::new();
         while *peek != Token::EOF && *peek != Token::RSquirly {
-            statements.push(self.statement());
+            statements.push(result_ok_or_err!(self.statement()));
             peek = self.peek();
         }
-        self.consume_and_advance(Token::RSquirly, "Expected \"}\" to close block");
+        return_err_if_err!(self.consume(Token::RSquirly, "Expected \"}\" to close block"));
 
-        Stmt::Block(statements)
+        Ok(Stmt::Block(statements))
     }
 
     // Rule: expression -> comparator | term
-    fn expression_statement(&mut self) -> Stmt {
-        let expr: Expr = match self.expression() {
-            Ok(e) => e,
-            Err(e) => panic!("{}", e)
-        };
-        self.consume_and_advance(Token::EndLine, "Expected \";\" to end expression stmt");
+    fn expression_statement(&mut self) -> Result<Stmt, String> {
+        let expr: Expr = result_ok_or_err!(self.expression());
+        return_err_if_err!(self.consume(Token::EndLine, "Expected \";\" to end expression stmt"));
 
-        Stmt::Expr(expr)
+        Ok(Stmt::Expr(expr))
     }
     
     fn eval_operator(&mut self) -> Result<Operator, String> {
@@ -328,7 +328,7 @@ impl Parser {
         false
     }
 
-    fn illegal_token_seq_check(&self) -> Result<u8, String> {
+    fn illegal_token_seq_check(&self) -> Result<(), String> {
         use tokens::Token::*;
         for i in 1..self.tokens.len() {
             let prev = &self.tokens[i-1];
@@ -361,7 +361,7 @@ impl Parser {
                 (_, _) => {}
             }
         }
-        Ok(0)
+        Ok(())
     }
 
     fn brackets_balanced(&self) -> bool {
@@ -384,36 +384,30 @@ impl Parser {
         self.pos += 1
     }
 
-    fn consume_and_advance(&mut self, expected: Token, err: &str) -> () {
+    /// Check the current token against the `expected` token, advance parser pos if matching.
+    /// If Tokens don't match, return a Result Err with the `err` message.
+    fn consume(&mut self, expected: Token, err: &str) -> Result<(), String> {
         if !self.matches_type(expected) {
-            panic!("{}. Found {:?}", err, self.peek())
+            return Err(format!("{}. Found {:?}", err, self.peek()))
         }
         self.advance();
+        Ok(())
     }
 
     // Rule: expression -> assignment
     fn expression(&mut self) -> Result<Expr, String> {
         // println!("expression called");
-        match self.assignment() {
-            Ok(e) => Ok(e),
-            Err(e) => Err(e)
-        }
+        Ok(result_ok_or_err!(self.assignment()))
     }
 
     // Rule: assignment -> logic_or | Identifier "=" expression
     fn assignment(&mut self) -> Result<Expr, String> {
-        let mut expr: Expr = match self.logic_or() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
+        let mut expr: Expr = result_ok_or_err!(self.logic_or());
 
         expr = match (&expr, self.peek()) {
             (Expr::Ident(v_name), Token::Equal) => {
                 self.advance();
-                let value: Expr = match self.assignment() {
-                    Ok(e) => e,
-                    Err(e) => return Err(e)
-                };
+                let value: Expr = result_ok_or_err!(self.assignment());
                 Expr::Assign { var_name: v_name.into(), new_value: Box::new(value) }
             },
             _ => expr
@@ -424,21 +418,13 @@ impl Parser {
 
     // Rule: logic_or -> logic_and ( "||" logic_and )*
     fn logic_or(&mut self) -> Result<Expr, String> {
-        let mut expr: Expr = match self.logic_and() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
+        let mut expr: Expr = result_ok_or_err!(self.logic_and());
 
         if self.matches_type(Token::Or) {
             let op: Operator = Operator::LogicalOr;
             self.advance();  // ||
-            // println!("Logical Or right: {:?}", self.peek());
-            let right: Expr = match self.logic_and() {
-                Ok(e) => e,
-                Err(e) => return Err(e)
-            };
+            let right: Expr = result_ok_or_err!(self.logic_and());
             expr = Expr::Logical { operator: op, left: Box::new(expr), right: Box::new(right) };
-            // println!("Logical or expr: {:?}", expr);
         }
     
         Ok(expr)
@@ -446,17 +432,11 @@ impl Parser {
 
     // Rule: logic_and -> term ( "&&" term )*
     fn logic_and(&mut self) -> Result<Expr, String> {
-        let mut expr: Expr = match self.comparator() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
+        let mut expr: Expr = result_ok_or_err!(self.comparator());
         if self.matches_type(Token::And) {
             let op: Operator = Operator::LogicalAnd;
             self.advance();
-            let right: Expr = match self.comparator() {
-                Ok(e) => e,
-                Err(e) => return Err(e)
-            };
+            let right: Expr = result_ok_or_err!(self.comparator());
             expr = Expr::Logical { operator: op, left: Box::new(expr), right: Box::new(right) }
         }
         Ok(expr)
@@ -464,20 +444,13 @@ impl Parser {
 
     // Rule: comparator -> term ( ("==" | "!=" | "<" | "<=" | ">" | ">=" ) term )*
     fn comparator(&mut self) -> Result<Expr, String> {
-        let mut expr: Expr = match self.term() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
-
+        let mut expr: Expr = result_ok_or_err!(self.term());
         let comparators = vec![Token::EqualTo, Token::Negate, Token::LessThan,
                                            Token::LessEquals, Token::GreaterThan, Token::GreaterEquals];
         
         if self.matches_types(comparators) {
             if let Ok(op) = self.eval_operator() {
-                let right = match self.term() {
-                    Ok(e) => e,
-                    Err(e) => return Err(e)
-                };
+                let right: Expr = result_ok_or_err!(self.term());
                 expr = Expr::Dyadic {
                     operator: op,
                     left: Box::new(expr),
@@ -485,26 +458,16 @@ impl Parser {
                 }
             }
         }
-
         Ok(expr)
     }
     
     // Rule: term -> factor ( ( "+" | "-" ) factor)*
     fn term(&mut self) -> Result<Expr, String> {
-        let mut expr = match self.factor() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
+        let mut expr: Expr = result_ok_or_err!(self.factor());
 
         while self.matches_types(vec![Token::Plus, Token::Minus]) {
-            let op: Operator = match self.eval_operator() {
-                Ok(o) => o,
-                Err(e) => return Err(e)
-            };
-            let right: Expr = match self.factor() {
-                Ok(e) => e,
-                Err(e) => return Err(e)
-            };
+            let op: Operator = result_ok_or_err!(self.eval_operator());
+            let right: Expr = result_ok_or_err!(self.factor());
             expr = Expr::Dyadic { operator: op, left: Box::new(expr), right: Box::new(right) }
         }
         Ok(expr)
@@ -512,20 +475,11 @@ impl Parser {
 
     // Rule: factor -> unary ( ( "*" | "/" | "%" ) unary)*
     fn factor(&mut self) -> Result<Expr, String> {
-        let mut expr: Expr = match self.unary() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
+        let mut expr: Expr = result_ok_or_err!(self.unary());
         // allowed tokens
         while self.matches_types(vec![Token::Star, Token::Slash, Token::Percent]) {
-            let op: Operator = match self.eval_operator() {
-                Ok(o) => o,
-                Err(e) => return Err(e)
-            };
-            let right: Expr = match self.unary() {
-                Ok(e) => e,
-                Err(e) => return Err(e)
-            };
+            let op: Operator = result_ok_or_err!(self.eval_operator());
+            let right: Expr = result_ok_or_err!(self.unary());
             expr = Expr::Dyadic { operator: op, left: Box::new(expr), right: Box::new(right) }
         }
         Ok(expr)
@@ -535,18 +489,12 @@ impl Parser {
     fn unary(&mut self) -> Result<Expr, String> {
         if self.matches_type(Token::Plus) {
             self.advance();
-            let operand: Expr = match self.fn_call() {
-                Ok(o) => o,
-                Err(e) => return Err(e)
-            };
+            let operand: Expr = result_ok_or_err!(self.fn_call());
             return Ok(Expr::Monadic { operator: Operator::Plus, operand: Box::new(operand) })
         }
         if self.matches_type(Token::Minus) {
             self.advance();
-            let operand: Expr = match self.fn_call() {
-                Ok(o) => o,
-                Err(e) => return Err(e)
-            };
+            let operand: Expr = result_ok_or_err!(self.fn_call());
             return Ok(Expr::Monadic { operator: Operator::Minus, operand: Box::new(operand) })
         }
         self.fn_call()
@@ -554,28 +502,20 @@ impl Parser {
 
     // fn_call -> atom | atom "(" expression ( "," expression )* ")"
     fn fn_call(&mut self) -> Result<Expr, String> {
-        let expr: Expr = match self.atom() {
-            Ok(e) => e,
-            Err(e) => return Err(e)
-        };
+        let expr: Expr = result_ok_or_err!(self.atom());
         // println!("fn_call pre-match: {:?}, {:?}", expr, peek);
         match (&expr, self.peek()) {
             (Expr::Ident(callee), Token::LParen) => {
                 self.advance();  // LParen
                 let mut args: Vec<Expr> = Vec::new();
                 while !self.matches_type(Token::RParen) {
-                    // println!("fn_call while: {:?}", self.peek());
-                    let arg = match self.expression() {
-                        Ok(a) => a,
-                        Err(e) => return Err(e)
-                    };
-                    args.push(arg);
+                    args.push(result_ok_or_err!(self.expression()));
                     if self.matches_type(Token::Comma) {
                         self.advance();
                     }
                 }
                 if args.len() > 255 {
-                    panic!("Too many arguments for function {}", callee)
+                    return Err(format!("Too many arguments for function {}", callee))
                 }
                 self.advance();  // RParen
                 Ok(Expr::Call { callee: callee.into(), args: args })
@@ -592,10 +532,7 @@ impl Parser {
             Token::Boolean(b) => Expr::Boolean(*b),
             Token::LParen => {
                 self.advance();  // Move past the LParen "("
-                let expr: Expr = match self.expression() {
-                    Ok(e) => e,
-                    Err(e) => return Err(e)
-                };
+                let expr: Expr = result_ok_or_err!(self.expression());
                 // Revisit: Is it still needed after parentheses balance checking?
                 // if self.pos >= self.tokens.len() || self.peek() != &Token::RParen {
                 //     return Err("Missing closing parenthesis".into())
