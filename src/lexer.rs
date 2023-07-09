@@ -63,9 +63,9 @@ fn is_newline(first: &char) -> bool {
 fn char_after_skipping_comment(iter: &mut Chars) -> char {
     let mut result = iter.next().unwrap();
     while !result.is_control() {
-        result = iter.next().unwrap();
+        result = iter.next().unwrap_or(13 as char);
     }
-    result = iter.next().unwrap();
+    result = iter.next().unwrap_or(3 as char);
     while result.is_whitespace(){
         result = iter.next().unwrap_or(3 as char);
     }
@@ -293,8 +293,7 @@ mod tests {
         let input1 = r#"
         // All Comments
         // No actual code
-        // :)
-        "#;
+        // :)"#;
         assert_eq!(vec![EOF], tokenise(input1.into()));
 
         let input2 = r#"
