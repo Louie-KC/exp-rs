@@ -2,31 +2,6 @@ use std::{collections::HashMap, mem::discriminant};
 
 use crate::ast::*;
 
-macro_rules! result_ok_or_err {
-    ($eval:expr) => {
-        match $eval {
-            Ok(value)  => value,
-            Err(error) => return Err(error)
-        }
-    };
-
-    ($eval:expr, $err_msg:expr) => {
-        match $eval {
-            Ok(value) => value,
-            _ => return Err($err_msg)
-        }
-    }
-}
-
-macro_rules! option_some_or_err {
-    ($eval:expr, $err_msg:expr) => {
-        match $eval {
-            Some(value) => value,
-            None => return Err($err_msg)
-        }
-    };
-}
-
 struct Function {
     params: Vec<String>,
     body: Stmt
@@ -84,7 +59,7 @@ impl Interpreter {
     pub fn interpret(&mut self, statements: &Vec<Stmt>) -> Result<i32, String> {
         let mut result = 0;  // Program exits with status code (default of 0)
         for statement in statements {
-            result = result_ok_or_err!(self.evaluate_stmt(&statement))
+            result = self.evaluate_stmt(&statement)?
         }
         Ok(result)
     }
@@ -97,7 +72,7 @@ impl Interpreter {
         // println!("Evaluating: {:?}", stmt);
         match stmt {
             Stmt::Print(expr) => {
-                let result = self.evalulate_expr(expr);
+                let result = self.evalulate_expr(expr)?;
                 println!("{:?}", result);
                 Ok(0)
             },
@@ -105,10 +80,9 @@ impl Interpreter {
                 self.evalulate_expr(expr)
             },
             Stmt::If {cond, then, els} => {
-                match self.evalulate_expr(cond) {
-                    Ok(0) => self.interpret_one(then),
-                    Ok(_) => self.interpret_one(els),
-                    _     => return Err(format!("Could not evaluate if condition: {:?}", cond))
+                match self.evalulate_expr(cond)? {
+                    0 => self.interpret_one(then),
+                    _ => self.interpret_one(els),
                 }
             },
             Stmt::While { cond, body } => {
@@ -123,11 +97,11 @@ impl Interpreter {
                 if needs_own_env {
                     self.env_stack.push(Environment::new());
                 }
-                let result = self.interpret(body);
+                let result = self.interpret(body)?;
                 if needs_own_env && self.env_stack.len() > 1 {
                     self.env_stack.pop();
                 }
-                result
+                Ok(result)
             },
             Stmt::VarDecl(ident, value) => {
                 if self.current_env_has(ident.into()) {
@@ -138,11 +112,13 @@ impl Interpreter {
                     None => 0
                 };
                 self.add_var(ident.into(), val);
-                Ok(0)
+                Ok(val)
             },
             Stmt::FnDecl { name, parameters, body } => {
-                let env = option_some_or_err!(self.env_stack.last_mut(),
-                        "All environments have been cleard".into());
+                let env = match self.env_stack.last_mut() {
+                    Some(en) => en,
+                    None => return Err("All environments have been cleared".into())
+                };
                 if env.get_function(name).is_some() {
                     return Err(format!("function \"{}\" already declared in scope", name))
                 }
@@ -166,7 +142,7 @@ impl Interpreter {
                 }
             },
             Expr::Monadic { operator, operand } => {
-                let operand_value = result_ok_or_err!(self.evalulate_expr(operand));
+                let operand_value = self.evalulate_expr(operand)?;
                 match operator {
                     Operator::Plus  => Ok(operand_value),
                     Operator::Minus => Ok(-operand_value),
@@ -174,8 +150,8 @@ impl Interpreter {
                 }
             },
             Expr::Dyadic { operator, left, right } => {
-                let lhs = result_ok_or_err!(self.evalulate_expr(left));
-                let rhs = result_ok_or_err!(self.evalulate_expr(right));
+                let lhs = self.evalulate_expr(left)?;
+                let rhs = self.evalulate_expr(right)?;
                 match operator {
                     Operator::Plus    => Ok(lhs + rhs),
                     Operator::Minus   => Ok(lhs - rhs),
@@ -207,7 +183,7 @@ impl Interpreter {
                 if self.get_var(var_name).is_none() {
                     return Err(format!("Cannot assign value to {} as it is not declared", var_name))
                 }
-                let val = result_ok_or_err!(self.evalulate_expr(new_value));
+                let val = self.evalulate_expr(new_value)?;
                 self.update_var(var_name, val);
                 Ok(val)
             },
@@ -219,9 +195,11 @@ impl Interpreter {
                 if env.is_none() {
                     return Err(format!("Undefined function \"{}\" was called", callee))
                 }
-                // unwrapping env safe per above
-                let function = option_some_or_err!(env.unwrap().get_function(callee),
-                    format!("Undefined function \"{}\" was called", callee));
+                // unwrapping of env is safe per above
+                let function = match env.unwrap().get_function(callee) {
+                    Some(f) => f,
+                    None    => return Err(format!("Undefined function \"{}\" was called", callee))
+                };
 
                 let params = &function.params;
                 if params.len() != args.len() {

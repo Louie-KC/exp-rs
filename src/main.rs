@@ -20,10 +20,13 @@ fn main() {
     println!("{}", source);
 
     let tokens = lexer::tokenise(source);
-    // for token in &tokens {
-    //     println!("{:?}", token);
-    // }
-    let parsed = Parser::new(tokens).parse().unwrap();
+    let parsed = match Parser::new(tokens).parse() {
+        Ok(p) => p,
+        Err(e) => {
+            println!("Parse error: {}", e);
+            return;  // Early exit main
+        },
+    };
     println!("{:?}", &parsed);
 
     let mut interpreter = Interpreter::new();
