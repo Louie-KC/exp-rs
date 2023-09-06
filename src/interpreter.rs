@@ -74,20 +74,20 @@ impl Interpreter {
             Stmt::Print(expr) => {
                 let result = self.evalulate_expr(expr)?;
                 println!("{:?}", result);
-                Ok(0)
+                Ok(1)
             },
             Stmt::Expr(expr) => {
                 self.evalulate_expr(expr)
             },
             Stmt::If {cond, then, els} => {
                 match self.evalulate_expr(cond)? {
-                    0 => self.interpret_one(then),
-                    _ => self.interpret_one(els),
+                    0 => self.interpret_one(els),
+                    _ => self.interpret_one(then)
                 }
             },
             Stmt::While { cond, body } => {
                 let mut result = 0;
-                while self.evalulate_expr(cond)? == 0 {
+                while self.evalulate_expr(cond)? != 0 {
                     result = self.interpret_one(&body)?
                 }
                 Ok(result)
@@ -112,7 +112,7 @@ impl Interpreter {
                     None => 0
                 };
                 self.add_var(ident.into(), val);
-                Ok(val)
+                Ok(val)  // use the value we just assigned
             },
             Stmt::FnDecl { name, parameters, body } => {
                 let env = match self.env_stack.last_mut() {
@@ -133,8 +133,8 @@ impl Interpreter {
         // println!("evaluate_expr: {:?}", expr);
         match expr {
             Expr::Int(n)   => Ok(*n),
-            Expr::Boolean(true)  => Ok(0),
-            Expr::Boolean(false) => Ok(1),
+            Expr::Boolean(true)  => Ok(1),
+            Expr::Boolean(false) => Ok(0),
             Expr::Ident(s) => {
                 match self.get_var(s).cloned() {
                     Some(val) => Ok(val),
@@ -158,12 +158,12 @@ impl Interpreter {
                     Operator::Star    => Ok(lhs * rhs),
                     Operator::Slash   => Ok(lhs / rhs),
                     Operator::Modulo  => Ok(lhs % rhs),
-                    Operator::EqualTo       => if lhs == rhs {Ok(0)} else {Ok(1)},
-                    Operator::NotEqualTo    => if lhs != rhs {Ok(0)} else {Ok(1)},
-                    Operator::LessThan      => if lhs <  rhs {Ok(0)} else {Ok(1)},
-                    Operator::LessEquals    => if lhs <= rhs {Ok(0)} else {Ok(1)},
-                    Operator::GreaterThan   => if lhs >  rhs {Ok(0)} else {Ok(1)},
-                    Operator::GreaterEquals => if lhs >= rhs {Ok(0)} else {Ok(1)},
+                    Operator::EqualTo       => if lhs == rhs {Ok(1)} else {Ok(0)},
+                    Operator::NotEqualTo    => if lhs != rhs {Ok(1)} else {Ok(0)},
+                    Operator::LessThan      => if lhs <  rhs {Ok(1)} else {Ok(0)},
+                    Operator::LessEquals    => if lhs <= rhs {Ok(1)} else {Ok(0)},
+                    Operator::GreaterThan   => if lhs >  rhs {Ok(1)} else {Ok(0)},
+                    Operator::GreaterEquals => if lhs >= rhs {Ok(1)} else {Ok(0)},
                     Operator::LogicalAnd
                     | Operator::LogicalOr   => Err("Logical operation in Dyadic expression".into()),
                 }
@@ -171,10 +171,10 @@ impl Interpreter {
             Expr::Logical { operator, left, right } => {
                 let lhs = self.evalulate_expr(left)?;
                 match (lhs, operator) {  // short circuit eval
-                    (1, Operator::LogicalAnd)  => Ok(1),
-                    (0, Operator::LogicalOr)   => Ok(0),
-                    (_, Operator::LogicalAnd)
-                    | (_, Operator::LogicalOr) => self.evalulate_expr(right),
+                    (0, Operator::LogicalAnd) => Ok(0),
+                    (0, Operator::LogicalOr)  => self.evalulate_expr(right),
+                    (_, Operator::LogicalOr)  => Ok(1),
+                    (_, Operator::LogicalAnd) => self.evalulate_expr(right),
                     _ => Err("Non-logical operator in Logical expression".into())
                 }
 
@@ -282,7 +282,7 @@ impl Interpreter {
         }
     }
 
-    #[allow(dead_code)]  // used for tests
+    #[cfg(test)]
     fn get_stack_size(&self) -> usize {
         self.env_stack.len()
     }
@@ -498,10 +498,10 @@ mod tests {
         let mut interpreter = Interpreter::new();
 
         // // Short circuit evaluation
-        // var flag_one = false;  // true = 0, false = 1
+        // var flag_one = false;  // true = 1, false = 0
         // if (false && flag_one = true) {}
-        // flag_one;  // should remain as false/1
-        assert_eq!(Ok(1), interpreter.interpret(
+        // flag_one;  // should remain as false/0  // CORRECTION
+        assert_eq!(Ok(0), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("flag_one".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
@@ -521,10 +521,10 @@ mod tests {
         ));
 
         // // Short circuit evaluation
-        // var flag_two = false;  // true = 0, false = 1
+        // var flag_two = false;  // true = 1, false = 0
         // if (true || flag_two = true) {}
-        // flag_two;  // should remain as false/1
-        assert_eq!(Ok(1), interpreter.interpret(
+        // flag_two;  // should remain as false/0 as right side of || does not evaluate
+        assert_eq!(Ok(0), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("flag_two".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
