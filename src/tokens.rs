@@ -1,5 +1,11 @@
 #[derive(Debug, PartialEq, Clone)]
-pub enum Token {
+pub struct Token {
+    pub line_num: u32,
+    pub kind: TokenKind
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TokenKind {
     // Literal
     Int(i32),
     Ident(String),

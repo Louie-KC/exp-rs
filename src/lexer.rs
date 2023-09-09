@@ -1,18 +1,21 @@
 use std::str::Chars;
 use crate::tokens::Token;
+use crate::tokens::TokenKind;
 
 pub fn tokenise(source: String) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
-    let mut iter: Chars = source.chars();
-
-    while let Some(token) = next_token(&mut iter) {
-        tokens.push(token);
+    let mut iter: Chars;
+    for (line_number, line) in source.split("\n").into_iter().enumerate() {
+        iter = line.chars();
+        while let Some(token) = next_token(&mut iter, line_number as u32) {
+            tokens.push(token);
+        }
     }
-    tokens.push(Token::EOF);
+    tokens.push(Token {line_num: 0, kind: TokenKind::EOF});
     tokens
 }
 
-fn next_token(iter: &mut Chars) -> Option<Token> {
+fn next_token(iter: &mut Chars, line_number: u32) -> Option<Token> {
     let mut first = iter.next()?;
     while first.is_whitespace() || is_newline(&first) {
         first = iter.next()?;
@@ -21,20 +24,20 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         first = char_after_skipping_comment(iter);
     }
 
-    let token = match first {
-        '+' => Token::Plus,
-        '-' => Token::Minus,
-        '*' => Token::Star,
-        '/' => Token::Slash,
-        '%' => Token::Percent,
-        '!' => Token::Negate,
-        '(' => Token::LParen,
-        ')' => Token::RParen,
-        '{' => Token::LSquirly,
-        '}' => Token::RSquirly,
-        ';' => Token::EndLine,
-        ':' => Token::Colon,
-        ',' => Token::Comma,
+    let token_kind = match first {
+        '+' => TokenKind::Plus,
+        '-' => TokenKind::Minus,
+        '*' => TokenKind::Star,
+        '/' => TokenKind::Slash,
+        '%' => TokenKind::Percent,
+        '!' => TokenKind::Negate,
+        '(' => TokenKind::LParen,
+        ')' => TokenKind::RParen,
+        '{' => TokenKind::LSquirly,
+        '}' => TokenKind::RSquirly,
+        ';' => TokenKind::EndLine,
+        ':' => TokenKind::Colon,
+        ',' => TokenKind::Comma,
         '|' | '&' => logical_operator(iter, first),
         '=' | '<' | '>' => equals_comparator_token(iter, first),
         '0'..='9' => number_token(iter, first),
@@ -42,7 +45,7 @@ fn next_token(iter: &mut Chars) -> Option<Token> {
         'A'..='Z' => text_token(iter, first),
         _ => return None
     };
-    Some(token)
+    Some(Token {line_num: line_number, kind: token_kind})
 }
 
 fn is_comment(first: &char, iter: &mut Chars) -> bool {
@@ -73,32 +76,32 @@ fn char_after_skipping_comment(iter: &mut Chars) -> char {
 
 }
 
-fn logical_operator(iter: &mut Chars, first: char) -> Token {
+fn logical_operator(iter: &mut Chars, first: char) -> TokenKind {
     let op = match (first, iter.clone().next()) {
-        ('&', Some('&')) => Token::And,
-        ('|', Some('|')) => Token::Or,
+        ('&', Some('&')) => TokenKind::And,
+        ('|', Some('|')) => TokenKind::Or,
         _ => panic!("Missing second {} in logical operator", first)
     };
     iter.next();
     op
 }
 
-fn equals_comparator_token(iter: &mut Chars, first: char) -> Token {
+fn equals_comparator_token(iter: &mut Chars, first: char) -> TokenKind {
     let next = iter.clone().next().unwrap_or(' ');
     if next == '=' {
         iter.next();
     }
     match (first, next) {
-        ('<', '=') => Token::LessEquals,
-        ('<', _)   => Token::LessThan,
-        ('>', '=') => Token::GreaterEquals,
-        ('>', _)   => Token::GreaterThan,
-        ('=', '=') => Token::EqualTo,
-        (_, _)     => Token::Equal
+        ('<', '=') => TokenKind::LessEquals,
+        ('<', _)   => TokenKind::LessThan,
+        ('>', '=') => TokenKind::GreaterEquals,
+        ('>', _)   => TokenKind::GreaterThan,
+        ('=', '=') => TokenKind::EqualTo,
+        (_, _)     => TokenKind::Equal
     }
 }
 
-fn number_token(iter: &mut Chars, first: char) -> Token {
+fn number_token(iter: &mut Chars, first: char) -> TokenKind {
     let mut number = first.to_digit(10).unwrap() as i32;
 
     while let Some(next_char) = iter.clone().next() {
@@ -110,10 +113,10 @@ fn number_token(iter: &mut Chars, first: char) -> Token {
         }
     }
 
-    Token::Int(number)
+    TokenKind::Int(number)
 }
 
-fn text_token(iter: &mut Chars, first: char) -> Token {
+fn text_token(iter: &mut Chars, first: char) -> TokenKind {
     // first char will be alphabetic per `next_token` implementation
     let mut word: String = String::from(first);
     while let Some(next_char) = iter.clone().next() {
@@ -125,73 +128,81 @@ fn text_token(iter: &mut Chars, first: char) -> Token {
         }
     }
     match word.as_str() {
-        "print" => Token::Print,
-        "let"   => Token::Let,
-        "var"   => Token::Var,
-        "fn"    => Token::Function,
-        "if"    => Token::If,
-        "else"  => Token::Else,
-        "true"  => Token::Boolean(true),
-        "false" => Token::Boolean(false),
-        "while" => Token::While,
-        "for"   => Token::For,
-        _       => Token::Ident(word)
+        "print" => TokenKind::Print,
+        "let"   => TokenKind::Let,
+        "var"   => TokenKind::Var,
+        "fn"    => TokenKind::Function,
+        "if"    => TokenKind::If,
+        "else"  => TokenKind::Else,
+        "true"  => TokenKind::Boolean(true),
+        "false" => TokenKind::Boolean(false),
+        "while" => TokenKind::While,
+        "for"   => TokenKind::For,
+        _       => TokenKind::Ident(word)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tokens::Token::*;
+    macro_rules! token {
+        ($line_number:expr, $token_kind:expr) => {
+            Token{line_num: $line_number, kind: $token_kind}
+        }
+    }
+
+    use crate::tokens::Token;
+    use crate::tokens::TokenKind::*;
     use crate::lexer::tokenise;
 
     #[test]
     fn simple() {
-        assert_eq!(vec![EOF], tokenise("".to_string()));
+        assert_eq!(vec![token!(0, EOF)], tokenise("".into()));
         assert_eq!(
-            vec![Int(12), EOF],
-            tokenise(String::from("12"))
+            vec![token!(0, Int(12)), token!(0, EOF)],
+            tokenise("12".into())
         );
         assert_eq!(
-            vec![Minus, Int(1024), Plus, Int(2), EOF],
-            tokenise(String::from("-1024 + 2"))
+            vec![token!(0, Minus), token!(0, Int(1024)), token!(0, Plus),
+                token!(0, Int(2)), token!(0, EOF)],
+            tokenise("-1024 + 2".into())
         );
         assert_eq!(
-            vec![Equal, Minus, Plus, Slash, Percent, EOF],
-            tokenise(String::from("=-+/%"))
+            vec![token!(0, Equal), token!(0, Minus), token!(0, Plus),
+                token!(0, Slash), token!(0, Percent), token!(0, EOF)],
+            tokenise("=-+/%".into())
         );
         assert_eq!(
-            vec![
-                Minus, Plus, Minus, Minus, Minus, Plus, Plus, Plus, EOF
-            ],
-            tokenise(String::from("   -+--  -++    +"))
+            vec![token!(0, Minus), token!(0, Plus), token!(0, Minus), token!(0, Minus),
+                token!(0, Minus), token!(0, Plus), token!(0, Plus), token!(0, Plus), token!(0, EOF)],
+            tokenise("   -+--  -++    +".into())
         );
         assert_eq!(
-            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, Negate, Equal, EOF],
+            vec![token!(0, EqualTo), token!(0, Equal), token!(0, LessThan),
+                token!(0, LessEquals), token!(0, GreaterThan), token!(0, GreaterEquals),
+                token!(0, Negate), token!(0, Equal), token!(0, EOF)],
             tokenise("== = < <= > >= !=".into())
         );
         assert_eq!(
-            vec![EqualTo, Equal, LessThan, LessEquals, GreaterThan, GreaterEquals, Negate, Equal, EOF],
+            vec![token!(0, EqualTo), token!(0, Equal), token!(0, LessThan),
+                token!(0, LessEquals), token!(0, GreaterThan), token!(0, GreaterEquals),
+                token!(0, Negate), token!(0, Equal), token!(0, EOF)],
             tokenise("===<<=>>=!=".into())
         );
-        assert_eq!(
-            vec![Or, And, EOF],
-            tokenise("|| &&".into())
-        )
+        assert_eq!(vec![token!(0, Or), token!(0, And), token!(0, EOF)], tokenise("|| &&".into()));
     }
 
     #[test]
     fn has_ident() {
-        assert_eq!(
-            vec![Ident("on_its_own".to_string()), EndLine, EOF],
-            tokenise("on_its_own;".to_string())
+        assert_eq!(vec![token!(0, Ident("on_its_own".into())), token!(0, EndLine), token!(0, EOF)],
+            tokenise("on_its_own;".into())
         );
-        assert_eq!(
-            vec![Ident("a".to_string()), Equal, Int(0), EndLine, EOF],
+        assert_eq!(vec![token!(0, Ident("a".into())), token!(0, Equal), token!(0, Int(0)),
+            token!(0, EndLine), token!(0, EOF)],
             tokenise("a = 0;".to_string())
         );
-        assert_eq!(
-            vec![Var, Ident("a".to_string()), Equal,
-                 Minus, Int(5), Plus, Minus, Int(2), EndLine, EOF],
+        assert_eq!(vec![token!(0, Var), token!(0, Ident("a".into())), token!(0, Equal),
+            token!(0, Minus), token!(0, Int(5)), token!(0, Plus), token!(0, Minus),
+            token!(0, Int(2)), token!(0, EndLine), token!(0, EOF)],
             tokenise("var a = -5 + -2;".to_string())
         );
     }
@@ -205,8 +216,9 @@ mod tests {
             0;
         "#.to_string();
         assert_eq!(
-            vec![If, LParen, Ident("ab".into()), RParen, LSquirly, Int(1), EndLine, RSquirly,
-                 Int(0), EndLine, EOF],
+            vec![token!(1, If), token!(1, LParen), token!(1, Ident("ab".into())),
+                token!(1, RParen), token!(1, LSquirly), token!(2, Int(1)), token!(2, EndLine),
+                token!(3, RSquirly), token!(4, Int(0)), token!(4, EndLine), token!(0, EOF)],
             tokenise(input1)
         );
 
@@ -218,10 +230,14 @@ mod tests {
             }
         "#.to_string();
         assert_eq!(
-            vec![If, LParen, Ident("a".into()), GreaterThan, Int(5), RParen,
-                    LSquirly, Int(1), EndLine, RSquirly,
-                Else, LSquirly, Int(2), EndLine, RSquirly, EOF],
-        tokenise(input2));
+            vec![token!(1, If), token!(1, LParen), token!(1, Ident("a".into())),
+                token!(1, GreaterThan), token!(1, Int(5)), token!(1, RParen),
+                token!(1, LSquirly), token!(2, Int(1)), token!(2, EndLine),
+                token!(3, RSquirly), token!(3, Else), token!(3, LSquirly),
+                token!(4, Int(2)), token!(4, EndLine),
+                token!(5, RSquirly), token!(0, EOF)],
+            tokenise(input2)
+        );
     }
 
     #[test]
@@ -235,15 +251,18 @@ mod tests {
         "#;
 
         assert_eq!(
-            vec![Let, Ident("add".into()), Equal, Function,
-                LParen,
-                    Ident("a".into()), Colon, Ident("int".into()), Comma,
-                    Ident("b".into()), Colon, Ident("int".into()),
-                RParen, Colon, Ident("int".into()),
-                LSquirly, Ident("a".into()), Plus, Ident("b".into()), RSquirly, EndLine,
-
-                Let, Ident("result".into()), Colon, Ident("int".into()),
-                Equal, Ident("add".into()), LParen, Int(16), Comma, Int(8), RParen, EndLine, EOF],
+            vec![token!(1, Let), token!(1, Ident("add".into())), token!(1, Equal),
+                token!(1, Function), token!(1, LParen),
+                    token!(1, Ident("a".into())), token!(1, Colon), token!(1, Ident("int".into())), token!(1, Comma),
+                    token!(1, Ident("b".into())), token!(1, Colon), token!(1, Ident("int".into())),
+                token!(1, RParen), token!(1, Colon), token!(1, Ident("int".into())), token!(1, LSquirly),
+                    token!(2, Ident("a".into())), token!(2, Plus), token!(2, Ident("b".into())),
+                token!(3, RSquirly), token!(3, EndLine),
+                token!(5, Let), token!(5, Ident("result".into())), token!(5, Colon),
+                    token!(5, Ident("int".into())), token!(5, Equal), token!(5, Ident("add".into())),
+                    token!(5, LParen), token!(5, Int(16)), token!(5, Comma), token!(5, Int(8)), token!(5, RParen),
+                    token!(5, EndLine),
+            token!(0, EOF)],
             tokenise(input1.into())
         );
 
@@ -257,16 +276,21 @@ mod tests {
         let oneAndHalf:int = half(eight) * 3;
         "#;
 
-        assert_eq!(
-            vec![Let, Ident("half".into()), Equal, Function,
-                LParen, Ident("n".into()), Colon, Ident("int".into()), RParen, Colon,
-                Ident("int".into()), LSquirly, Ident("n".into()), Slash, Int(2), RSquirly, EndLine,
-
-                Let, Ident("eight".into()), Colon, Ident("int".into()), Equal, Int(8), EndLine,
-
-                Let, Ident("oneAndHalf".into()), Colon, Ident("int".into()), Equal, Ident("half".into()),
-                LParen, Ident("eight".into()), RParen, Star, Int(3), EndLine, EOF],
-            tokenise(input2.into())
+        assert_eq!(vec![
+            token!(1, Let), token!(1, Ident("half".into())), token!(1, Equal), token!(1, Function),
+                token!(1, LParen), token!(1, Ident("n".into())), token!(1, Colon),
+                token!(1, Ident("int".into())), token!(1, RParen),
+                token!(1, Colon), token!(1, Ident("int".into())),
+            token!(1, LSquirly),
+                token!(2, Ident("n".into())), token!(2, Slash), token!(2, Int(2)),
+            token!(3, RSquirly), token!(3, EndLine),
+            token!(5, Let), token!(5, Ident("eight".into())), token!(5, Colon),
+                token!(5, Ident("int".into())), token!(5, Equal), token!(5, Int(8)), token!(5, EndLine),
+            token!(7, Let), token!(7, Ident("oneAndHalf".into())), token!(7, Colon),
+                token!(7, Ident("int".into())),token!(7, Equal),
+                token!(7, Ident("half".into())), token!(7, LParen), token!(7, Ident("eight".into())),
+                token!(7, RParen), token!(7, Star), token!(7, Int(3)), token!(7, EndLine), token!(0, EOF)
+            ], tokenise(input2.into())
         );
 
         let input3 = r#"
@@ -277,14 +301,20 @@ mod tests {
         let result:int = incr(0);
         "#;
 
-        assert_eq!(
-            vec![Let, Ident("incr".into()), Equal, Function,
-                LParen, Ident("n".into()), Colon, Ident("int".into()), RParen, Colon, Ident("int".into()),
-                LSquirly, Ident("n".into()), Plus, Int(1), EndLine, Ident("n".into()), RSquirly, EndLine,
-
-                Let, Ident("result".into()), Colon, Ident("int".into()), Equal, Ident("incr".into()),
-                LParen, Int(0), RParen, EndLine, EOF],
-            tokenise(input3.into())
+        assert_eq!(vec![
+                token!(1, Let), token!(1, Ident("incr".into())), token!(1, Equal), token!(1, Function),
+                token!(1, LParen), token!(1, Ident("n".into())), token!(1, Colon),
+                token!(1, Ident("int".into())), token!(1, RParen),
+                token!(1, Colon), token!(1, Ident("int".into())),
+            token!(1, LSquirly),
+                token!(2, Ident("n".into())), token!(2, Plus), token!(2, Int(1)), token!(2, EndLine),
+                token!(3, Ident("n".into())),
+            token!(4, RSquirly), token!(4, EndLine),
+            token!(5, Let), token!(5, Ident("result".into())), token!(5, Colon),
+                token!(5, Ident("int".into())), token!(5, Equal), token!(5, Ident("incr".into())),
+                token!(5, LParen), token!(5, Int(0)), token!(5, RParen), token!(5, EndLine),
+            token!(0, EOF)
+            ], tokenise(input3.into())
         );
     }
 
@@ -294,7 +324,7 @@ mod tests {
         // All Comments
         // No actual code
         // :)"#;
-        assert_eq!(vec![EOF], tokenise(input1.into()));
+        assert_eq!(vec![token!(0, EOF)], tokenise(input1.into()));
 
         let input2 = r#"
         // e
@@ -303,8 +333,11 @@ mod tests {
         print(6);  // then prints 6
         // should be EOF here
         "#;
-        assert_eq!(vec![Print, LParen, Int(5), RParen, EndLine,
-                        Print, LParen, Int(6), RParen, EndLine,
-                        EOF], tokenise(input2.into()))
+        assert_eq!(
+            vec![token!(2, Print), token!(2, LParen), token!(2, Int(5)), token!(2, RParen), token!(2, EndLine),
+                token!(4, Print), token!(4, LParen), token!(4, Int(6)), token!(4, RParen), token!(4, EndLine),
+                token!(0, EOF)],
+            tokenise(input2.into())
+        );
     }
 }
