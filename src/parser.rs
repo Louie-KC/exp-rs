@@ -1,7 +1,17 @@
 use std::mem::{discriminant};
 
+use crate::errors::ParseError;
 use crate::tokens::{Token, TokenKind, self};
 use crate::ast::*;
+use crate::errors::ParseErrorKind as PEK;
+
+type ParseResult<T> = Result<T, ParseError>;
+
+macro_rules! parse_err {
+    ($line_num:expr, $kind:expr) => {
+        Err(ParseError {line_num: $line_num, kind: $kind})
+    };
+}
 
 /*
  * Recursive Descent
@@ -46,13 +56,16 @@ impl Parser {
         Self { tokens: tokens, pos: 0 }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Stmt>, String> {
-        if !self.brackets_balanced() {
-            return Err("Inbalanced brackets".into())
-        }
-        if let Err(e) = self.illegal_token_seq_check() {
-            return Err(e);
-        }
+    pub fn parse(&mut self) -> ParseResult<Vec<Stmt>> {
+        // if !self.brackets_balanced() {
+        //     return Err("Inbalanced brackets".into())
+        //     // return ParseError
+        // }
+        self.brackets_balanced()?;
+        self.illegal_token_seq_check()?;
+        // if let Err(e) = self.illegal_token_seq_check() {
+        //     return Err(e);
+        // }
 
         // println!("Parsing: {:?}", self.tokens);
         let mut statements: Vec<Stmt> = Vec::new();
@@ -64,7 +77,8 @@ impl Parser {
         Ok(statements)
     }
 
-    fn statement(&mut self) -> Result<Stmt, String> {
+    // fn statement(&mut self) -> Result<Stmt, String> {
+        fn statement(&mut self) -> ParseResult<Stmt> {
         // println!("statement: {:?}", self.peek());
         match self.peek().kind {
             TokenKind::Print => self.print_statement(),
@@ -79,32 +93,34 @@ impl Parser {
     }
 
     // Rule: print -> "print(" expression ");"
-    fn print_statement(&mut self) -> Result<Stmt, String> {
+    // fn print_statement(&mut self) -> Result<Stmt, String> {
+        fn print_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // Print
         let val: Expr = self.expression()?;
-        self.consume(TokenKind::EndLine, "Expected \";\" to end print statement")?;
+        self.consume(TokenKind::EndLine)?; //, "Expected \";\" to end print statement")?;
         Ok(Stmt::Print(val))
     }
 
     // Rule: fnDeclr -> "fn" function
-    fn function_declaration(&mut self) -> Result<Stmt, String> {
+    fn function_declaration(&mut self) -> ParseResult<Stmt> {
         self.advance();  // fn
         self.function()
     }
 
     // Rule: function -> Identifier "(" ( Identifier ( "," Identifier )* )? ")" block
-    fn function(&mut self) -> Result<Stmt, String> {
+    fn function(&mut self) -> ParseResult<Stmt> {
         let name = match self.atom() {
             Ok(Expr::Ident(n)) => n,
-            _ => return Err("Expected name identifier in function declaration".into())
+            _ => return parse_err!(self.peek().line_num, PEK::MissingFunctionName)
         };
-        self.consume(TokenKind::LParen, "Missing \"(\" on function declaration")?;
+        self.consume(TokenKind::LParen)?;  //, "Missing \"(\" on function declaration")?;
 
         let mut parameters: Vec<String> = vec![];
         while !self.matches_type(TokenKind::RParen) {
             parameters.push(match self.atom() {
                 Ok(Expr::Ident(n)) => n,
-                _ => return Err("Expected named parameter for function declaration".into())
+                // _ => return Err("Expected named parameter for function declaration".into())
+                _ => return parse_err!(self.peek().line_num, PEK::MissingIdentifier)
             });
             if self.matches_type(TokenKind::Comma) {
                 self.advance();
@@ -112,20 +128,20 @@ impl Parser {
         }
         self.advance();  // RParen
         if parameters.len() > 255 {
-            return Err(format!("Over 255 parameters for function {}", name))
+            return parse_err!(self.peek().line_num, PEK::ExcessParameters)
         }
         if !self.matches_type(TokenKind::LSquirly) {
-            return Err(format!("Expect function body in function declaration. Found: {:?}", self.peek()))
+            return parse_err!(self.peek().line_num, PEK::MissingBlock)
         }
         let body: Stmt = self.block_statement()?;
         Ok(Stmt::FnDecl { name: name, parameters: parameters, body: Box::new(body) })
     }
 
     // Rule: varDecl -> "var" Identifier ( "=" statement )? ";"
-    fn var_statement(&mut self) -> Result<Stmt, String> {
+    fn var_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // var
         if !self.matches_type(TokenKind::Ident("".into())) {
-            return Err("Expected identifier after \"var\"".into());
+            return parse_err!(self.peek().line_num, PEK::MissingIdentifier)
         }
         let ident: String = self.get_var_name();
         self.advance();
@@ -136,7 +152,7 @@ impl Parser {
                 let v: Stmt = self.statement()?;
                 match (deterministic, self.matches_type(TokenKind::EndLine)) {
                     (true, true)  => self.advance(),
-                    (true, false) => return Err("Expected ; after var declaration".into()),
+                    (true, false) => return parse_err!(self.peek().line_num, PEK::MissingSemicolon),
                     _        => {}
                 }
                 Some(Box::new(v))
@@ -145,7 +161,7 @@ impl Parser {
                 self.advance();  // ;
                 None
             },
-            _ => return Err("Expected \";\" or value to end variable declaration".into())
+            _ => return parse_err!(self.peek().line_num, PEK::MissingSemicolon)
         };
         Ok(Stmt::VarDecl(ident.into(), value))
     }
@@ -159,13 +175,13 @@ impl Parser {
     }
 
     // Rule: if -> "if(" expression ")" block ( else block )?
-    fn if_statement(&mut self) -> Result<Stmt, String> {
+    fn if_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // if
-        self.consume(TokenKind::LParen, "Expected \"(\" after if")?;
+        self.consume(TokenKind::LParen)?;//, "Expected \"(\" after if")?;
 
         let cond: Expr = self.expression()?;
         
-        self.consume(TokenKind::RParen, "Expected \")\" after if condition")?;
+        self.consume(TokenKind::RParen)?;//, "Expected \")\" after if condition")?;
 
         let then: Stmt = self.statement()?;
         let els: Stmt = if self.matches_type(TokenKind::Else) {
@@ -178,21 +194,25 @@ impl Parser {
     }
 
     // Rule: while -> "while(" expression ")" block
-    fn while_statement(&mut self) -> Result<Stmt, String> {
+    fn while_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // while
-        self.advance();  // LParen
+        // self.advance();  // LParen
+        self.consume(TokenKind::LParen)?;
 
         let cond: Expr = self.expression()?;
-        self.consume(TokenKind::RParen, "Expected \")\" after while condition")?;
+        self.consume(TokenKind::RParen)?; //, "Expected \")\" after while condition")?;
 
+        if self.peek().kind != TokenKind::LSquirly {
+            return parse_err!(self.peek().line_num, PEK::MissingBlock)
+        }
         let body = self.block_statement()?;
         Ok(Stmt::While { cond: cond, body: Box::new(body) })
     }
 
     // Rule: for -> "for" "(" ( varDeclr | expression )? ";" expression? ";" expression ")" block
-    fn for_statement(&mut self) -> Result<Stmt, String> {
+    fn for_statement(&mut self) -> ParseResult<Stmt> {
         self.advance(); // for
-        self.advance(); // LParen
+        self.consume(TokenKind::LParen)?;
 
         let init = match self.peek().kind {
             TokenKind::EndLine => {
@@ -206,7 +226,8 @@ impl Parser {
             TokenKind::EndLine => Expr::Boolean(true),
             _ => self.expression()?
         };
-        self.advance();  // ;
+        // self.advance();  // ;
+        self.consume(TokenKind::EndLine)?;
 
         let step = match self.peek().kind {
             TokenKind::RParen => None,
@@ -214,12 +235,12 @@ impl Parser {
         };
 
         // println!("{:?}, {:?}, {:?}", init, cond, step);
-        self.consume(TokenKind::RParen, "Expected \"(\" to close loop condition")?;
+        self.consume(TokenKind::RParen)?; //, "Expected \"(\" to close loop condition")?;
 
         // assembling
         let mut loop_body = match self.block_statement() {
             Ok(Stmt::Block(stmts)) => stmts,
-            _ => return Err("For loop expected a body of block statement".into())
+            _ => return parse_err!(self.peek().line_num, PEK::MissingBlock)
         };
         if let Some(step_expr) = step {
             loop_body.push(Stmt::Expr(step_expr));
@@ -235,7 +256,7 @@ impl Parser {
     }
 
     // Rule: block -> "{" statement* "}"
-    fn block_statement(&mut self) -> Result<Stmt, String> {
+    fn block_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // {
         let mut peek = self.peek();
         let mut statements:Vec<Stmt> = Vec::new();
@@ -243,20 +264,21 @@ impl Parser {
             statements.push(self.statement()?);
             peek = self.peek();
         }
-        self.consume(TokenKind::RSquirly, "Expected \"}\" to close block")?;
+        self.consume(TokenKind::RSquirly)?; // , "Expected \"}\" to close block")?;
 
         Ok(Stmt::Block(statements))
     }
 
     // Rule: expression -> comparator | term
-    fn expression_statement(&mut self) -> Result<Stmt, String> {
+    // fn expression_statement(&mut self) -> Result<Stmt, String> {
+    fn expression_statement(&mut self) -> ParseResult<Stmt> {
         let expr: Expr = self.expression()?;
-        self.consume(TokenKind::EndLine, "Expected \";\" to end expression stmt")?;
+        self.consume(TokenKind::EndLine)?; // , "Expected \";\" to end expression stmt")?;
 
         Ok(Stmt::Expr(expr))
     }
     
-    fn eval_operator(&mut self) -> Result<Operator, String> {
+    fn eval_operator(&mut self) -> ParseResult<Operator> {
         let op = match self.peek().kind {
             TokenKind::Plus    => Operator::Plus,
             TokenKind::Minus   => Operator::Minus,
@@ -279,7 +301,8 @@ impl Parser {
             TokenKind::GreaterEquals => Operator::GreaterEquals,
             TokenKind::Or      => Operator::LogicalOr,
             TokenKind::And     => Operator::LogicalAnd,
-            _ => return Err("Invalid operator".into())
+            // _ => return Err("Invalid operator".into())
+            _ => return parse_err!(self.peek().line_num, PEK::UnrecognisedSymbol(format!("{:?}", self.peek())))
         };
         self.advance();
         Ok(op)
@@ -310,11 +333,12 @@ impl Parser {
         false
     }
 
-    fn illegal_token_seq_check(&self) -> Result<(), String> {
+    fn illegal_token_seq_check(&self) -> ParseResult<()> {
         use tokens::TokenKind::*;
         for i in 1..self.tokens.len() {
             let prev = &self.tokens[i-1];
             let cur = &self.tokens[i];
+            let mut bad_seq_flag = false;
 
             // Int and Ident token checking. Cannot seem to get working with pattern matching :(
             let int_discrim = discriminant(&TokenKind::Int(0));
@@ -322,44 +346,79 @@ impl Parser {
             let prev_discrim = discriminant(&prev.kind);
             let cur_discrim = discriminant(&cur.kind);
             if prev_discrim == int_discrim && cur_discrim == int_discrim {
-                return Err("Two Int tokens in a row".into());
+                // return Err("Two Int tokens in a row".into());
+                bad_seq_flag = true;
             }
             if prev_discrim == ident_discrim && cur_discrim == ident_discrim {
-                return Err("Two Ident tokens in a row".into());
+                // return Err("Two Ident tokens in a row".into());
+                bad_seq_flag = true;
             }
             if prev_discrim == int_discrim && cur_discrim == ident_discrim {
-                return Err("Int token immediately followed by Ident token".into())
+                // return Err("Int token immediately followed by Ident token".into())
+                bad_seq_flag = true;
             }
             if prev_discrim == ident_discrim && cur_discrim == int_discrim {
-                return Err("Ident token immediately followed by Int token".into())
+                // return Err("Ident token immediately followed by Int token".into())
+                bad_seq_flag = true;
             }
 
             // Remaining illegal token combinations
             match (&self.tokens[i-1].kind, &self.tokens[i].kind) {
-                (Function, Function) => return Err("Two Function tokens in a row".into()),
-                (Star, Star)   => return Err("Two Star tokens in a row".into()),
-                (Slash, Slash) => return Err("Two Slash tokens in a row".into()),
-                (Let, Let)     => return Err("Two Let tokens in a row".into()),
+                // (Function, Function) => return Err("Two Function tokens in a row".into()),
+                // (Star, Star)   => return Err("Two Star tokens in a row".into()),
+                // (Slash, Slash) => return Err("Two Slash tokens in a row".into()),
+                // (Let, Let)     => return Err("Two Let tokens in a row".into()),
+                (Function, Function)
+                | (Star, Star)
+                | (Slash, Slash)
+                | (Let, Let) => bad_seq_flag = true,
                 (_, _) => {}
+            }
+            if bad_seq_flag {
+                return Err(ParseError{line_num: 0, kind: PEK::IllegalTokenSequence})
             }
         }
         Ok(())
     }
 
-    fn brackets_balanced(&self) -> bool {
-        let mut stack: Vec<TokenKind> = Vec::new();
+    fn brackets_balanced(&self) -> ParseResult<()> {
+        let mut stack: Vec<(TokenKind, u32)> = Vec::new();
 
         for token in self.tokens.iter() {
             match token.kind {
-                TokenKind::LParen   => stack.push(TokenKind::LParen),
-                TokenKind::LSquirly => stack.push(TokenKind::LSquirly),
-                TokenKind::RParen   if stack.pop() != Some(TokenKind::LParen)   => return false,
-                TokenKind::RSquirly if stack.pop() != Some(TokenKind::LSquirly) => return false,
+                TokenKind::LParen   => stack.push((TokenKind::LParen, token.line_num)),
+                TokenKind::LSquirly => stack.push((TokenKind::LSquirly, token.line_num)),
+                TokenKind::RParen => {
+                    match stack.pop() {
+                        Some((TokenKind::LParen, _)) => {}
+                        _ => return Err(ParseError {
+                            line_num: token.line_num,
+                            kind: PEK::MissingOpeningParenthesis
+                        })
+                    }
+                }
+                TokenKind::RSquirly => {
+                    match stack.pop() {
+                        Some((TokenKind::LSquirly, _)) => {}
+                        _ => return Err(ParseError {
+                            line_num: token.line_num,
+                            kind: PEK::MissingOpeningCurlyBrace
+                        })
+                    }
+                }
                 _ => {}
             }
         }
-
-        stack.is_empty()
+        match stack.last() {
+            Some((TokenKind::LParen, ln))   => parse_err!(*ln, PEK::MissingClosingParenthesis),
+            Some((TokenKind::LSquirly, ln)) => parse_err!(*ln, PEK::MissingClosingCurlyBrace),
+            _ => Ok(())
+        }
+        // match stack.is_empty() {
+        //     true  => Ok(()),
+        //     false => Err(ParseError { line_num: 0, kind: PEK::UnrecognisedSymbol("".into()) })
+        // }
+        // stack.is_empty()
     }
 
     fn advance(&mut self) -> () {
@@ -367,23 +426,32 @@ impl Parser {
     }
 
     /// Check the current token against the `expected` token, advance parser pos if matching.
-    /// If Tokens don't match, return a Result Err with the `err` message.
-    fn consume(&mut self, expected: TokenKind, err: &str) -> Result<(), String> {
-        if !self.matches_type(expected) {
-            return Err(format!("{}. Found {:?}", err, self.peek()))
-        }
+    /// If Tokens don't match, return an appropriate Parse Error Result.
+    fn consume(&mut self, expected: TokenKind) -> ParseResult<()> {
+        if !self.matches_type(expected.clone()) {
+            let err = match expected.clone() {
+                TokenKind::EndLine => PEK::MissingSemicolon,
+                TokenKind::LParen  => PEK::MissingOpeningParenthesis,
+                TokenKind::RParen  => PEK::MissingClosingParenthesis,
+                TokenKind::LSquirly => PEK::MissingOpeningCurlyBrace,
+                TokenKind::RSquirly => PEK::MissingClosingCurlyBrace,
+                _ => PEK::UnexpectedSymbol(expected, self.peek().kind.clone())
+
+            };
+            return parse_err!(self.peek().line_num, err)
+        };
         self.advance();
         Ok(())
     }
 
     // Rule: expression -> assignment
-    fn expression(&mut self) -> Result<Expr, String> {
+    fn expression(&mut self) -> ParseResult<Expr> {
         // println!("expression called");
         Ok(self.assignment()?)
     }
 
     // Rule: assignment -> logic_or | Identifier "=" expression
-    fn assignment(&mut self) -> Result<Expr, String> {
+    fn assignment(&mut self) -> ParseResult<Expr> {
         let mut expr: Expr = self.logic_or()?;
 
         expr = match (&expr, &self.peek().kind) {
@@ -399,7 +467,7 @@ impl Parser {
     }
 
     // Rule: logic_or -> logic_and ( "||" logic_and )*
-    fn logic_or(&mut self) -> Result<Expr, String> {
+    fn logic_or(&mut self) -> ParseResult<Expr> {
         let mut expr: Expr = self.logic_and()?;
 
         if self.matches_type(TokenKind::Or) {
@@ -413,7 +481,7 @@ impl Parser {
     }
 
     // Rule: logic_and -> term ( "&&" term )*
-    fn logic_and(&mut self) -> Result<Expr, String> {
+    fn logic_and(&mut self) -> ParseResult<Expr> {
         let mut expr: Expr = self.comparator()?;
         if self.matches_type(TokenKind::And) {
             let op: Operator = Operator::LogicalAnd;
@@ -425,7 +493,7 @@ impl Parser {
     }
 
     // Rule: comparator -> term ( ("==" | "!=" | "<" | "<=" | ">" | ">=" ) term )*
-    fn comparator(&mut self) -> Result<Expr, String> {
+    fn comparator(&mut self) -> ParseResult<Expr> {
         let mut expr: Expr = self.term()?;
         let comparators = vec![TokenKind::EqualTo, TokenKind::Negate,
                                             TokenKind::LessThan, TokenKind::LessEquals,
@@ -445,7 +513,7 @@ impl Parser {
     }
     
     // Rule: term -> factor ( ( "+" | "-" ) factor)*
-    fn term(&mut self) -> Result<Expr, String> {
+    fn term(&mut self) -> ParseResult<Expr> {
         let mut expr: Expr = self.factor()?;
 
         while self.matches_types(vec![TokenKind::Plus, TokenKind::Minus]) {
@@ -457,7 +525,7 @@ impl Parser {
     }
 
     // Rule: factor -> unary ( ( "*" | "/" | "%" ) unary)*
-    fn factor(&mut self) -> Result<Expr, String> {
+    fn factor(&mut self) -> ParseResult<Expr> {
         let mut expr: Expr = self.unary()?;
         // allowed tokens
         while self.matches_types(vec![TokenKind::Star, TokenKind::Slash, TokenKind::Percent]) {
@@ -469,7 +537,7 @@ impl Parser {
     }
 
     // Rule: unary -> fn_call | "+" fn_call | "-" fn_call
-    fn unary(&mut self) -> Result<Expr, String> {
+    fn unary(&mut self) -> ParseResult<Expr> {
         if self.matches_type(TokenKind::Plus) {
             self.advance();
             let operand: Expr = self.fn_call()?;
@@ -484,7 +552,7 @@ impl Parser {
     }
 
     // fn_call -> atom | atom "(" expression ( "," expression )* ")"
-    fn fn_call(&mut self) -> Result<Expr, String> {
+    fn fn_call(&mut self) -> ParseResult<Expr> {
         let expr: Expr = self.atom()?;
         // println!("fn_call pre-match: {:?}, {:?}", expr, peek);
         match (&expr, &self.peek().kind) {
@@ -498,7 +566,11 @@ impl Parser {
                     }
                 }
                 if args.len() > 255 {
-                    return Err(format!("Too many arguments for function {}", callee))
+                    // return Err(format!("Too many arguments for function {}", callee))
+                    return Err(ParseError {
+                        line_num: self.peek().line_num,
+                        kind: PEK::ExcessParameters
+                    })
                 }
                 self.advance();  // RParen
                 Ok(Expr::Call { callee: callee.into(), args: args })
@@ -508,7 +580,7 @@ impl Parser {
     }
 
     // Rule: atom -> "(" expression ")" | Integer | Identifier | Boolean
-    fn atom(&mut self) -> Result<Expr, String> {
+    fn atom(&mut self) -> ParseResult<Expr> {
         let expr: Expr = match &self.peek().kind {
             TokenKind::Int(n) => Expr::Int(*n),
             TokenKind::Ident(s) => Expr::Ident(s.into()),
@@ -522,7 +594,7 @@ impl Parser {
                 // }
                 expr
             },
-            _ => return Err(format!("Invalid atom: {:?}", *self.peek()))
+            _ => return parse_err!(self.peek().line_num, PEK::UnrecognisedSymbol(format!("{:?}", self.peek().kind)))
         };
         self.advance();
         Ok(expr)
@@ -534,6 +606,7 @@ impl Parser {
 mod tests {
     use std::vec;
 
+    use crate::errors::*;
     use crate::parser::Parser;
     use crate::tokens::Token;
     use crate::tokens::TokenKind as TK;
@@ -584,25 +657,29 @@ mod tests {
     #[test]
     fn bad_token_combo_error_check() {
         assert_eq!(
-            Err("Two Int tokens in a row".into()),
-            Parser::new(vec![token!(0, TK::Int(0)), token!(0, TK::Int(0)), token!(0, TK::EOF)]).parse()
+            // Err("Two Int tokens in a row".into()),
+            parse_err!(0, ParseErrorKind::IllegalTokenSequence),
+            Parser::new(vec![token!(0, TK::Int(0)), token!(0, TK::Int(0)), token!(0, TK::EndLine), token!(0, TK::EOF)]).parse()
         );
         assert_eq!(
-            Err("Two Int tokens in a row".into()),
+            // Err("Two Int tokens in a row".into()),
+            parse_err!(0, ParseErrorKind::IllegalTokenSequence),
             Parser::new(vec![
                 token!(0, TK::Int(0)), token!(0, TK::Plus), token!(0, TK::Int(0)), token!(0, TK::Int(0)),
-                token!(0, TK::EOF)
+                token!(0, TK::EndLine), token!(0, TK::EOF)
             ]).parse()
         );
         assert_eq!(
-            Err("Two Ident tokens in a row".into()),
+            // Err("Two Ident tokens in a row".into()),
+            parse_err!(0, ParseErrorKind::IllegalTokenSequence),
             Parser::new(vec![
                 token!(0, TK::Ident("a".into())), token!(0, TK::Ident("b".into())),
                 token!(0, TK::EndLine), token!(0, TK::EOF)
             ]).parse()
         );
         assert_eq!(
-            Err("Ident token immediately followed by Int token".into()),
+            // Err("Ident token immediately followed by Int token".into()),
+            parse_err!(0, ParseErrorKind::IllegalTokenSequence),
             Parser::new(vec![
                 token!(0, TK::Ident("a".into())), token!(0, TK::Int(0)),
                 token!(0, TK::EndLine), token!(0, TK::EOF)
@@ -618,20 +695,20 @@ mod tests {
                              TK::RParen, TK::RParen, TK::RParen, TK::EndLine, TK::EOF])).parse()
         );
         assert_eq!(
-            Err("Inbalanced brackets".into()),
+            parse_err!(0, ParseErrorKind::MissingOpeningParenthesis),
             Parser::new(tokens!(vec![TK::RParen, TK::EOF])).parse()
         );
         assert_eq!(
-            Err("Inbalanced brackets".into()),
+            parse_err!(0, ParseErrorKind::MissingClosingParenthesis),
             Parser::new(tokens!(vec![TK::LParen, TK::LParen, TK::RParen, TK::EndLine, TK::EOF])).parse()
         );
         assert_eq!(
-            Err("Inbalanced brackets".into()),
+            parse_err!(0, ParseErrorKind::MissingClosingParenthesis),
             Parser::new(tokens!(vec![TK::LParen, TK::RParen, TK::LParen,
                              TK::Ident("a".into()), TK::EndLine, TK::EOF])).parse()
         );
         assert_eq!(
-            Err("Inbalanced brackets".into()),
+            parse_err!(0, ParseErrorKind::MissingOpeningParenthesis),
             Parser::new(tokens!(vec![TK::LParen, TK::LParen, TK::LParen, TK::RParen,
                             TK::RParen, TK::RParen, TK::RParen, TK::EndLine, TK::EOF])).parse()
         );
@@ -1006,6 +1083,31 @@ mod tests {
     }
 
     #[test]
+    fn variables_errors() {
+        assert_eq!(  // var ;
+            parse_err!(0, ParseErrorKind::MissingIdentifier),
+            Parser::new(tokens!(vec![TK::Var, TK::EndLine, TK::EOF])).parse()
+        );
+        assert_eq!(  // var = 5;
+            parse_err!(0, ParseErrorKind::MissingIdentifier),
+            Parser::new(tokens!(vec![TK::Var, TK::Equal, TK::Int(5), TK::EndLine, TK::EOF])).parse()
+        );
+        // assert_eq!(
+        //     parse_err!(0, ParseErrorKind::UnexpectedSymbol(TK::Equal, TK::Int(5))),
+        //     Parser::new(tokens!(vec![TK::Var, TK::Ident("a".into()), TK::Int(5), TK::EndLine, TK::EOF])).parse()
+        // );
+        assert_eq!(
+            // var n = 0;
+            // var ;
+            parse_err!(1, ParseErrorKind::MissingIdentifier),
+            Parser::new(vec![
+                token!(0, TK::Var), token!(0, TK::Ident("n".into())), token!(0, TK::EndLine),
+                token!(1, TK::Var), token!(1, TK::EndLine), token!(0, TK::EOF)
+            ]).parse()
+        );
+    }
+
+    #[test]
     fn loops() {
         // while (true) {}
         assert_eq!(
@@ -1125,6 +1227,33 @@ mod tests {
                 TK::Print, TK::LParen, TK::Ident("i".into()), TK::Slash, TK::Int(2), TK::RParen, TK::EndLine,
             TK::RSquirly, TK::EOF
         ])).parse());
+    }
+
+    #[test]
+    fn loops_errors() {
+        // while loops
+        assert_eq!(  // while (true);
+            parse_err!(0, ParseErrorKind::MissingBlock),
+            Parser::new(tokens!(vec![TK::While, TK::LParen, TK::Boolean(true), TK::RParen,
+                                TK::EndLine, TK::EOF])).parse()
+        );
+        assert_eq!(  // while true) {}
+            parse_err!(0, ParseErrorKind::MissingOpeningParenthesis),
+            Parser::new(tokens!(vec![TK::While, TK::Boolean(true),
+                                TK::LSquirly, TK::RSquirly, TK::EOF])).parse()
+        );
+        assert_eq!(  // while (true {}
+            parse_err!(0, ParseErrorKind::MissingClosingParenthesis),
+            Parser::new(tokens!(vec![TK::While, TK::LParen, TK::Boolean(true),
+                                TK::LSquirly, TK::RSquirly, TK::EOF])).parse()
+        );
+
+        // TODO: for loops
+        // assert_eq!(  // TODO: for (;;)
+        //     parse_err!(0, ParseErrorKind::MissingBlock),
+        //     Parser::new(tokens!(vec![TK::For, TK::LParen, TK::EndLine, TK::EndLine, TK::RParen,
+        //                         TK::EOF])).parse()
+        // )
     }
 
     #[test]

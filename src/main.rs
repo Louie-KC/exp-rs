@@ -9,6 +9,7 @@ mod ast;
 mod lexer;
 mod parser;
 mod interpreter;
+mod errors;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
