@@ -79,7 +79,13 @@ impl Interpreter {
             Stmt::Expr(expr) => {
                 self.evalulate_expr(expr)
             },
-            Stmt::If {cond, then, els} => {
+            Stmt::If { cond, then, els: None } => {
+                match self.evalulate_expr(cond)? {
+                    0 => Ok(0),
+                    _ => self.interpret_one(then)
+                }
+            },
+            Stmt::If {cond, then, els: Some(els)} => {
                 match self.evalulate_expr(cond)? {
                     0 => self.interpret_one(els),
                     _ => self.interpret_one(then)
@@ -372,7 +378,7 @@ mod tests {
             Stmt::VarDecl("c".into(), Some(Box::new(Stmt::If {
                 cond: Expr::Boolean(false),
                 then: Box::new(Stmt::Expr(Expr::Int(1))),
-                els: Box::new(Stmt::Expr(Expr::Int(1023)))
+                els: Some(Box::new(Stmt::Expr(Expr::Int(1023))))
             }))),
             Stmt::Expr(Expr::Ident("c".into()))
         ]));
@@ -410,7 +416,7 @@ mod tests {
                         right: Box::new(Expr::Int(256))
                     },
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
-                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                    els: Some(Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))])))
                 }]
         ));
 
@@ -424,7 +430,7 @@ mod tests {
                         right: Box::new(Expr::Int(512))
                     },
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
-                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                    els: Some(Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))])))
                 }]
         ));
 
@@ -438,7 +444,7 @@ mod tests {
                         right: Box::new(Expr::Int(2048))
                     },
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(11))])),
-                    els: Box::new(Stmt::Block(vec![]))
+                    els: None
                 }]
         ));
         
@@ -457,7 +463,7 @@ mod tests {
                         right: Box::new(Expr::Ident("b".into()))
                     },
                     then: Box::new(Stmt::Expr(Expr::Ident("a".into()))),
-                    els: Box::new(Stmt::Expr(Expr::Ident("b".into())))
+                    els: Some(Box::new(Stmt::Expr(Expr::Ident("b".into()))))
                 }))),
                 Stmt::Expr(Expr::Ident("max".into()))
                 ]
@@ -473,7 +479,7 @@ mod tests {
                         right: Box::new(Expr::Boolean(true))
                     },
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
-                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                    els: Some(Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))])))
                 }]
         ));
 
@@ -487,7 +493,7 @@ mod tests {
                         right: Box::new(Expr::Boolean(false))
                     },
                     then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))])),
-                    els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))]))
+                    els: Some(Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(2))])))
                 }]
         ));
 
@@ -514,7 +520,7 @@ mod tests {
                         })
                     },
                     then: Box::new(Stmt::Block(vec![])),
-                    els: Box::new(Stmt::Block(vec![]))
+                    els: None
                 },
                 Stmt::Expr(Expr::Ident("flag_one".into()))
             ]
@@ -537,7 +543,7 @@ mod tests {
                         })
                     },
                     then: Box::new(Stmt::Block(vec![])),
-                    els: Box::new(Stmt::Block(vec![]))
+                    els: None
                 },
                 Stmt::Expr(Expr::Ident("flag_two".into()))
             ]
@@ -616,7 +622,7 @@ mod tests {
                         right: Box::new(Expr::Int(1))
                     })
                 ])),
-                els: Box::new(Stmt::Block(vec![]))
+                els: None
             },
             Stmt::Expr(Expr::Ident("toast".into()))
         ]));
@@ -635,7 +641,7 @@ mod tests {
                     Stmt::VarDecl("abc".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
                     Stmt::Expr(Expr::Ident("abc".into()))
                 ])),
-                els: Box::new(Stmt::Block(vec![]))
+                els: None
             }))),
             Stmt::Expr(Expr::Ident("result".into()))
         ]));
@@ -658,7 +664,7 @@ mod tests {
                     Stmt::VarDecl("abcd".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
                     Stmt::Expr(Expr::Ident("abcd".into()))
                 ])),
-                els: Box::new(Stmt::Block(vec![
+                els: Some(Box::new(Stmt::Block(vec![
                     Stmt::VarDecl("abcd".into(), Some(Box::new(Stmt::Expr(Expr::Ident("abcd".into()))))),
                     Stmt::Expr(Expr::Assign {
                         var_name: "abcd".into(),
@@ -669,7 +675,7 @@ mod tests {
                         })
                     }),
                     Stmt::Expr(Expr::Ident("abcd".into()))
-                ]))
+                ])))
             }))),
             Stmt::Expr(Expr::Ident("output".into()))
         ]));
@@ -688,7 +694,7 @@ mod tests {
                     Stmt::VarDecl("abcde".into(), Some(Box::new(Stmt::Expr(Expr::Int(10))))),
                     Stmt::Expr(Expr::Ident("abcde".into()))
                 ])),
-                els: Box::new(Stmt::Block(vec![]))
+                els: None
             }))),
             Stmt::Expr(Expr::Ident("abcde".into()))
         ]));
@@ -734,7 +740,7 @@ mod tests {
                                 })
                             })
                         })),
-                        els: Box::new(Stmt::Block(vec![]))
+                        els: None
                     },
                 Stmt::Expr(Expr::Ident("n".into()))
                 ]))
@@ -765,7 +771,7 @@ mod tests {
                             right: Box::new(Expr::Ident("b".into()))
                         },
                         then: Box::new(Stmt::Expr(Expr::Ident("a".into()))),
-                        els: Box::new(Stmt::Expr(Expr::Ident("b".into())))}
+                        els: Some(Box::new(Stmt::Expr(Expr::Ident("b".into()))))}
                 ]))
             },
             Stmt::Expr(Expr::Call { callee: "max".to_string(), args: vec![Expr::Int(128), Expr::Int(64)] })

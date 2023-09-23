@@ -2,10 +2,10 @@
 pub enum Stmt {
     Expr(Expr),
     Print(Expr),
-    If{
+    If {
         cond: Expr,
         then: Box<Stmt>,
-        els: Box<Stmt>
+        els: Option<Box<Stmt>>
     },
     While {
         cond: Expr,
@@ -13,7 +13,7 @@ pub enum Stmt {
     },
     Block(Vec<Stmt>),
     VarDecl(String, Option<Box<Stmt>>),
-    FnDecl{
+    FnDecl {
         name: String,
         parameters: Vec<String>,
         body: Box<Stmt>

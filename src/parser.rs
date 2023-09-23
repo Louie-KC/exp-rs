@@ -77,8 +77,7 @@ impl Parser {
         Ok(statements)
     }
 
-    // fn statement(&mut self) -> Result<Stmt, String> {
-        fn statement(&mut self) -> ParseResult<Stmt> {
+    fn statement(&mut self) -> ParseResult<Stmt> {
         // println!("statement: {:?}", self.peek());
         match self.peek().kind {
             TokenKind::Print => self.print_statement(),
@@ -93,8 +92,7 @@ impl Parser {
     }
 
     // Rule: print -> "print(" expression ");"
-    // fn print_statement(&mut self) -> Result<Stmt, String> {
-        fn print_statement(&mut self) -> ParseResult<Stmt> {
+    fn print_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // Print
         let val: Expr = self.expression()?;
         self.consume(TokenKind::EndLine)?; //, "Expected \";\" to end print statement")?;
@@ -184,19 +182,18 @@ impl Parser {
         self.consume(TokenKind::RParen)?;//, "Expected \")\" after if condition")?;
 
         let then: Stmt = self.statement()?;
-        let els: Stmt = if self.matches_type(TokenKind::Else) {
+        let els: Option<Box<Stmt>> = if self.matches_type(TokenKind::Else) {
             self.advance();  // else
-            self.statement()?
+            Some(Box::new(self.statement()?))
         } else {
-            Stmt::Block(vec![])
+            None
         };
-        Ok(Stmt::If{ cond: cond, then: Box::new(then), els: Box::new(els)})
+        Ok(Stmt::If{ cond: cond, then: Box::new(then), els: els})
     }
 
     // Rule: while -> "while(" expression ")" block
     fn while_statement(&mut self) -> ParseResult<Stmt> {
         self.advance();  // while
-        // self.advance();  // LParen
         self.consume(TokenKind::LParen)?;
 
         let cond: Expr = self.expression()?;
@@ -226,7 +223,6 @@ impl Parser {
             TokenKind::EndLine => Expr::Boolean(true),
             _ => self.expression()?
         };
-        // self.advance();  // ;
         self.consume(TokenKind::EndLine)?;
 
         let step = match self.peek().kind {
@@ -270,7 +266,6 @@ impl Parser {
     }
 
     // Rule: expression -> comparator | term
-    // fn expression_statement(&mut self) -> Result<Stmt, String> {
     fn expression_statement(&mut self) -> ParseResult<Stmt> {
         let expr: Expr = self.expression()?;
         self.consume(TokenKind::EndLine)?; // , "Expected \";\" to end expression stmt")?;
@@ -301,7 +296,6 @@ impl Parser {
             TokenKind::GreaterEquals => Operator::GreaterEquals,
             TokenKind::Or      => Operator::LogicalOr,
             TokenKind::And     => Operator::LogicalAnd,
-            // _ => return Err("Invalid operator".into())
             _ => return parse_err!(self.peek().line_num, PEK::UnrecognisedSymbol(format!("{:?}", self.peek())))
         };
         self.advance();
@@ -906,7 +900,8 @@ mod tests {
             // if (true) {}
             Ok(vec![Stmt::If {cond: Expr::Boolean(true),
                               then: Box::new(Stmt::Block(vec![])),
-                              els: Box::new(Stmt::Block(vec![]))} ]),
+                              els: None} ]),
+                            //   els: Box::new(Stmt::Block(vec![]))} ]),
             Parser::new(tokens!(vec![TK::If, TK::LParen, TK::Boolean(true), TK::RParen,
                                 TK::LSquirly, TK::RSquirly, TK::EOF])).parse()
         );
@@ -919,7 +914,7 @@ mod tests {
                     right: Box::new(Expr::Int(8))
                 },
                 then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
-                els: Box::new(Stmt::Block(vec![]))}]),
+                els: None}]),
             Parser::new(tokens!(vec![TK::If, TK::LParen, TK::Ident("a".into()), TK::EqualTo,
                             TK::Int(8), TK::RParen, TK::LSquirly,
                                 TK::Print, TK::LParen, TK::Int(0), TK::RParen, TK::EndLine,
@@ -935,7 +930,7 @@ mod tests {
                     right: Box::new(Expr::Int(8))
                 },
                 then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
-                els: Box::new(Stmt::Block(vec![]))}]),
+                els: None}]),
             Parser::new(tokens!(vec![TK::If, TK::LParen, TK::Ident("a".into()), TK::Negate, TK::Equal,
                             TK::Int(8), TK::RParen, TK::LSquirly,
                                 TK::Print, TK::LParen, TK::Int(0), TK::RParen, TK::EndLine,
@@ -953,7 +948,7 @@ mod tests {
                     })
                 },
                 then: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(0))])),
-                els: Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(1)), Stmt::Print(Expr::Int(2))]))}]),
+                els: Some(Box::new(Stmt::Block(vec![Stmt::Print(Expr::Int(1)), Stmt::Print(Expr::Int(2))])))}]),
             Parser::new(tokens!(vec![TK::If, TK::LParen, TK::Ident("abc".into()), TK::LessThan, TK::Minus, TK::Int(8), TK::RParen,
                             TK::LSquirly,
                                 TK::Print, TK::LParen, TK::Int(0), TK::RParen, TK::EndLine,
@@ -971,7 +966,7 @@ mod tests {
                     right: Box::new(Expr::Boolean(true))
                 },
                 then: Box::new(Stmt::Block(vec![])),
-                els: Box::new(Stmt::Block(vec![]))
+                els: None
             }]),
             Parser::new(tokens!(vec![TK::If, TK::LParen, TK::Boolean(false), TK::Or, TK::Boolean(true),
                     TK::RParen, TK::LSquirly, TK::RSquirly, TK::EOF]))
@@ -994,7 +989,7 @@ mod tests {
                     })
                 },
                 then: Box::new(Stmt::Block(vec![])),
-                els: Box::new(Stmt::Block(vec![]))
+                els: None
             }]),
             Parser::new(tokens!(vec![TK::If, TK::LParen,
                                 TK::Int(0), TK::LessEquals, TK::Ident("a".into()), TK::And,
@@ -1014,7 +1009,7 @@ mod tests {
                     })
                 },
                 then: Box::new(Stmt::Block(vec![])),
-                els: Box::new(Stmt::Block(vec![]))
+                els: None
             }]),
             Parser::new(tokens!(vec![TK::If, TK::LParen, TK::Boolean(true), TK::Or, TK::Boolean(true),
                                 TK::And, TK::Boolean(true), TK::RParen, TK::LSquirly, TK::RSquirly,
@@ -1060,7 +1055,7 @@ mod tests {
                             Some(Box::new(Stmt::If {
                                 cond: Expr::Boolean(false),
                                 then: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(0))])),
-                                els: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Ident("a".into()))]))
+                                els: Some(Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Ident("a".into()))])))
                             })))]),
             Parser::new(tokens!(vec![TK::Var, TK::Ident("b".into()), TK::Equal,
                              TK::If,
