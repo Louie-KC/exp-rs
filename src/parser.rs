@@ -468,7 +468,8 @@ impl Parser {
             let op: Operator = Operator::LogicalOr;
             self.advance();  // ||
             let right: Expr = self.logic_and()?;
-            expr = Expr::Logical { operator: op, left: Box::new(expr), right: Box::new(right) };
+            // expr = Expr::Logical { operator: op, left: Box::new(expr), right: Box::new(right) };
+            expr = Expr::Dyadic { operator: op, left: Box::new(expr), right: Box::new(right) };
         }
     
         Ok(expr)
@@ -481,7 +482,8 @@ impl Parser {
             let op: Operator = Operator::LogicalAnd;
             self.advance();
             let right: Expr = self.comparator()?;
-            expr = Expr::Logical { operator: op, left: Box::new(expr), right: Box::new(right) }
+            // expr = Expr::Logical { operator: op, left: Box::new(expr), right: Box::new(right) }
+            expr = Expr::Dyadic { operator: op, left: Box::new(expr), right: Box::new(right) }
         }
         Ok(expr)
     }
@@ -960,7 +962,7 @@ mod tests {
         assert_eq!(
             // if (false || true) {}
             Ok(vec![Stmt::If {
-                cond: Expr::Logical {
+                cond: Expr::Dyadic {
                     operator: Operator::LogicalOr,
                     left: Box::new(Expr::Boolean(false)),
                     right: Box::new(Expr::Boolean(true))
@@ -975,7 +977,7 @@ mod tests {
         assert_eq!(
             // if (0 <= a && a <= 4) {}
             Ok(vec![Stmt::If {
-                cond: Expr::Logical {
+                cond: Expr::Dyadic {
                     operator: Operator::LogicalAnd,
                     left: Box::new(Expr::Dyadic {
                         operator: Operator::LessEquals,
@@ -999,10 +1001,10 @@ mod tests {
         // if (true || true && true) {}  // Logical And has higher precedence over Logical Or
         assert_eq!(
             Ok(vec![Stmt::If {
-                cond: Expr::Logical {
+                cond: Expr::Dyadic {
                     operator: Operator::LogicalOr,
                     left: Box::new(Expr::Boolean(true)),
-                    right: Box::new(Expr::Logical {
+                    right: Box::new(Expr::Dyadic {
                         operator: Operator::LogicalAnd,
                         left: Box::new(Expr::Boolean(true)),
                         right: Box::new(Expr::Boolean(true))

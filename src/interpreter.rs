@@ -157,13 +157,21 @@ impl Interpreter {
             },
             Expr::Dyadic { operator, left, right } => {
                 let lhs = self.evalulate_expr(left)?;
+                match (lhs, operator) {  // (short circuit) evaluation of logical operators
+                    (0, Operator::LogicalAnd) => return Ok(0),
+                    (0, Operator::LogicalOr)  => return self.evalulate_expr(right),
+                    (_, Operator::LogicalOr)  => return Ok(1),
+                    (_, Operator::LogicalAnd) => return self.evalulate_expr(right),
+                    _ => {}  // Move on to the remaining dyadic operators
+                }
+
                 let rhs = self.evalulate_expr(right)?;
                 match operator {
-                    Operator::Plus    => Ok(lhs + rhs),
-                    Operator::Minus   => Ok(lhs - rhs),
-                    Operator::Star    => Ok(lhs * rhs),
-                    Operator::Slash   => Ok(lhs / rhs),
-                    Operator::Modulo  => Ok(lhs % rhs),
+                    Operator::Plus          => Ok(lhs + rhs),
+                    Operator::Minus         => Ok(lhs - rhs),
+                    Operator::Star          => Ok(lhs * rhs),
+                    Operator::Slash         => Ok(lhs / rhs),
+                    Operator::Modulo        => Ok(lhs % rhs),
                     Operator::EqualTo       => if lhs == rhs {Ok(1)} else {Ok(0)},
                     Operator::NotEqualTo    => if lhs != rhs {Ok(1)} else {Ok(0)},
                     Operator::LessThan      => if lhs <  rhs {Ok(1)} else {Ok(0)},
@@ -171,20 +179,9 @@ impl Interpreter {
                     Operator::GreaterThan   => if lhs >  rhs {Ok(1)} else {Ok(0)},
                     Operator::GreaterEquals => if lhs >= rhs {Ok(1)} else {Ok(0)},
                     Operator::LogicalAnd
-                    | Operator::LogicalOr   => Err("Logical operation in Dyadic expression".into()),
+                    | Operator::LogicalOr   => Err("Logical operators missed by evaluation".into()),
                 }
             },
-            Expr::Logical { operator, left, right } => {
-                let lhs = self.evalulate_expr(left)?;
-                match (lhs, operator) {  // short circuit eval
-                    (0, Operator::LogicalAnd) => Ok(0),
-                    (0, Operator::LogicalOr)  => self.evalulate_expr(right),
-                    (_, Operator::LogicalOr)  => Ok(1),
-                    (_, Operator::LogicalAnd) => self.evalulate_expr(right),
-                    _ => Err("Non-logical operator in Logical expression".into())
-                }
-
-            }
             Expr::Assign { var_name, new_value } => {
                 if self.get_var(var_name).is_none() {
                     return Err(format!("Cannot assign value to {} as it is not declared", var_name))
@@ -473,7 +470,7 @@ mod tests {
         assert_eq!(Ok(1), interpreter.interpret(
             &vec![
                 Stmt::If {
-                    cond: Expr::Logical {
+                    cond: Expr::Dyadic {
                         operator: Operator::LogicalAnd,
                         left: Box::new(Expr::Boolean(true)),
                         right: Box::new(Expr::Boolean(true))
@@ -487,7 +484,7 @@ mod tests {
         assert_eq!(Ok(2), interpreter.interpret(
             &vec![
                 Stmt::If {
-                    cond: Expr::Logical {
+                    cond: Expr::Dyadic {
                         operator: Operator::LogicalAnd,
                         left: Box::new(Expr::Boolean(true)),
                         right: Box::new(Expr::Boolean(false))
@@ -506,12 +503,12 @@ mod tests {
         // // Short circuit evaluation
         // var flag_one = false;  // true = 1, false = 0
         // if (false && flag_one = true) {}
-        // flag_one;  // should remain as false/0  // CORRECTION
+        // flag_one;  // should remain as false/0
         assert_eq!(Ok(0), interpreter.interpret(
             &vec![
                 Stmt::VarDecl("flag_one".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
-                    cond: Expr::Logical {
+                    cond: Expr::Dyadic {
                         operator: Operator::LogicalAnd,
                         left: Box::new(Expr::Boolean(false)),
                         right: Box::new(Expr::Assign {
@@ -534,7 +531,7 @@ mod tests {
             &vec![
                 Stmt::VarDecl("flag_two".into(), Some(Box::new(Stmt::Expr(Expr::Boolean(false))))),
                 Stmt::If {
-                    cond: Expr::Logical {
+                    cond: Expr::Dyadic {
                         operator: Operator::LogicalOr,
                         left: Box::new(Expr::Boolean(true)),
                         right: Box::new(Expr::Assign {

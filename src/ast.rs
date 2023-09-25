@@ -51,11 +51,6 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>
     },
-    Logical {
-        operator: Operator,
-        left: Box<Expr>,
-        right: Box<Expr>
-    },
     Assign {
         var_name: String,
         new_value: Box<Expr>
