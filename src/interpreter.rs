@@ -1,6 +1,16 @@
 use std::{collections::HashMap, mem::discriminant};
 
 use crate::ast::*;
+use crate::errors::InterpretError;
+use crate::errors::InterpretErrorKind as IEK;
+
+type InterpretResult<T> = Result<T, InterpretError>;
+
+macro_rules! interpret_err {
+    ($kind:expr) => {
+        Err(InterpretError { kind: $kind })
+    }
+}
 
 struct Function {
     params: Vec<String>,
@@ -56,7 +66,7 @@ impl Interpreter {
         Self { env_stack: vec![Environment::new()] }
     }
     
-    pub fn interpret(&mut self, statements: &Vec<Stmt>) -> Result<i32, String> {
+    pub fn interpret(&mut self, statements: &Vec<Stmt>) -> InterpretResult<i32> {
         let mut result = 0;  // Program exits with status code (default of 0)
         for statement in statements {
             result = self.evaluate_stmt(&statement)?
@@ -64,11 +74,11 @@ impl Interpreter {
         Ok(result)
     }
 
-    pub fn interpret_one(&mut self, statement: &Stmt) -> Result<i32, String> {
+    pub fn interpret_one(&mut self, statement: &Stmt) -> InterpretResult<i32> {
         self.evaluate_stmt(&statement)
     }
     
-    fn evaluate_stmt(&mut self, stmt: &Stmt) -> Result<i32, String> {
+    fn evaluate_stmt(&mut self, stmt: &Stmt) -> InterpretResult<i32> {
         // println!("Evaluating: {:?}", stmt);
         match stmt {
             Stmt::Print(expr) => {
@@ -110,8 +120,8 @@ impl Interpreter {
                 Ok(result)
             },
             Stmt::VarDecl(ident, value) => {
-                if self.current_env_has(ident.into()) {
-                    return Err(format!("Variable \"{}\" already declared in current scope", ident))
+                if let true = self.current_env_has_var(ident.into())? {
+                    return interpret_err!(IEK::VarRedeclaration(ident.into()))
                 }
                 let val = match value {
                     Some(v) => self.evaluate_stmt(v).unwrap(),
@@ -123,10 +133,10 @@ impl Interpreter {
             Stmt::FnDecl { name, parameters, body } => {
                 let env = match self.env_stack.last_mut() {
                     Some(en) => en,
-                    None => return Err("All environments have been cleared".into())
+                    None => return interpret_err!(IEK::NoEnvironments)
                 };
                 if env.get_function(name).is_some() {
-                    return Err(format!("function \"{}\" already declared in scope", name))
+                    return interpret_err!(IEK::FnRedeclaration(name.into()))
                 }
                 let func = Function::new(parameters.to_owned(), *body.to_owned());
                 env.declare_function(name, func);
@@ -135,7 +145,7 @@ impl Interpreter {
         }
     }
                  
-    fn evalulate_expr(&mut self, expr: &Expr) -> Result<i32, String> {
+    fn evalulate_expr(&mut self, expr: &Expr) -> InterpretResult<i32> {
         // println!("evaluate_expr: {:?}", expr);
         match expr {
             Expr::Int(n)   => Ok(*n),
@@ -144,7 +154,7 @@ impl Interpreter {
             Expr::Ident(s) => {
                 match self.get_var(s).cloned() {
                     Some(val) => Ok(val),
-                    None => Err(format!("Undefined variable {}", s))
+                    None => interpret_err!(IEK::VarNotInScope(s.into()))
                 }
             },
             Expr::Monadic { operator, operand } => {
@@ -152,7 +162,7 @@ impl Interpreter {
                 match operator {
                     Operator::Plus  => Ok(operand_value),
                     Operator::Minus => Ok(-operand_value),
-                    _ => Err(format!("Bad operator: {:?} onto {}", operator, operand_value))
+                    _ => interpret_err!(IEK::InvalidOperation(operator.clone(), operand.clone()))
                 }
             },
             Expr::Dyadic { operator, left, right } => {
@@ -179,12 +189,13 @@ impl Interpreter {
                     Operator::GreaterThan   => if lhs >  rhs {Ok(1)} else {Ok(0)},
                     Operator::GreaterEquals => if lhs >= rhs {Ok(1)} else {Ok(0)},
                     Operator::LogicalAnd
-                    | Operator::LogicalOr   => Err("Logical operators missed by evaluation".into()),
+                    | Operator::LogicalOr   => interpret_err!(IEK::PlaceHolderError),
+                    // | Operator::LogicalOr   => Err("Logical operators missed by evaluation".into()),
                 }
             },
             Expr::Assign { var_name, new_value } => {
                 if self.get_var(var_name).is_none() {
-                    return Err(format!("Cannot assign value to {} as it is not declared", var_name))
+                    return interpret_err!(IEK::VarNotInScope(var_name.into()))
                 }
                 let val = self.evalulate_expr(new_value)?;
                 self.update_var(var_name, val);
@@ -192,22 +203,17 @@ impl Interpreter {
             },
             Expr::Call { callee, args } => {
                 // Search for environment with callee starting from inner most environment/scope
-                let env = self.env_stack.iter()
+                let Some(function) = self.env_stack.iter()
                     .rev()
-                    .find(|e| e.get_function(callee).is_some());
-                if env.is_none() {
-                    return Err(format!("Undefined function \"{}\" was called", callee))
-                }
-                // unwrapping of env is safe per above
-                let function = match env.unwrap().get_function(callee) {
-                    Some(f) => f,
-                    None    => return Err(format!("Undefined function \"{}\" was called", callee))
-                };
-
+                    .find(|env| env.get_function(callee).is_some())
+                    .and_then(|env| env.get_function(callee))
+                    else {
+                        return interpret_err!(IEK::FnNotInScope(callee.into()))
+                    };
+                    
                 let params = &function.params;
                 if params.len() != args.len() {
-                    return Err(format!("{}: Expected {} args but found {}",
-                        callee, params.len(), args.len()))
+                    return interpret_err!(IEK::FnBadArgs(callee.into(), params.len(), args.len()))
                 }
 
                 let mut block: Vec<Stmt> = params.into_iter()
@@ -231,9 +237,14 @@ impl Interpreter {
     /// Determines whether a block statement needs its own variable environment added onto the
     /// environment stack by checking if the statements of the block make any declarations.
     fn block_needs_stack(&self, stack_body: &Vec<Stmt>) -> bool {
+        let var_decl = discriminant(&Stmt::VarDecl("".into(), None));
+        let fn_decl = discriminant(&Stmt::FnDecl {
+            name: "".into(), parameters: vec![], body: Box::new(Stmt::Block(vec![]))
+        });
         for stmt in stack_body {
-            if discriminant(stmt) == discriminant(&Stmt::VarDecl("".into(), None)) {
-                return true
+            let stmt_disc = discriminant(stmt);
+            if stmt_disc.eq(&var_decl) || stmt_disc.eq(&fn_decl) {
+                return true;
             }
         }
         false
@@ -256,12 +267,11 @@ impl Interpreter {
 
     /// Determines whether a variable with the parameter 'name' already exists
     /// in the current/inner-most scope.
-    fn current_env_has(&self, name: &String) -> bool {
-        let env = match self.env_stack.last() {
-            Some(e) => e,
-            None => panic!("All environments have been cleared")
-        };
-        env.get_var(name).is_some()
+    fn current_env_has_var(&self, name: &String) -> InterpretResult<bool> {
+        match self.env_stack.last() {
+            Some(env) => Ok(env.get_var(name).is_some()),
+            None => return interpret_err!(IEK::NoEnvironments)
+        }
     }
 
     /// Updates the value of an existing variable with the 'name' parameter.
@@ -294,6 +304,8 @@ impl Interpreter {
 #[cfg(test)]
 mod tests {
     use crate::ast::*;
+    use crate::errors::InterpretError;
+    use crate::errors::InterpretErrorKind as IEK;
     use crate::interpreter::Interpreter;
 
     #[test]
@@ -337,11 +349,11 @@ mod tests {
         let mut interpreter = Interpreter::new();
         
         // my_var;
-        assert_eq!(Err("Undefined variable my_var".into()),
+        assert_eq!(interpret_err!(IEK::VarNotInScope("my_var".into())),
                    interpreter.interpret_one(&Stmt::Expr(Expr::Ident("my_var".into()))));
 
-        // undefined_var = 1;
-        assert_eq!(Err("Cannot assign value to undefined_var as it is not declared".into()),
+        // undefined_var = 1;  // not declared
+        assert_eq!(interpret_err!(IEK::VarNotInScope("undefined_var".into())),
             interpreter.interpret_one(&Stmt::Expr(Expr::Assign {
                 var_name: "undefined_var".into(),
                 new_value: Box::new(Expr::Int(1))
@@ -349,7 +361,7 @@ mod tests {
 
         // var defined_twice;
         // var defined_twice;
-        assert_eq!(Err("Variable \"defined_twice\" already declared in current scope".into()),
+        assert_eq!(interpret_err!(IEK::VarRedeclaration("defined_twice".into())),
             interpreter.interpret(&vec![
                 Stmt::VarDecl("defined_twice".into(), None),
                 Stmt::VarDecl("defined_twice".into(), None)
@@ -704,9 +716,65 @@ mod tests {
         let mut interpreter = Interpreter::new();
 
         // mystery();
-        assert_eq!(Err("Undefined function \"mystery\" was called".into()),
+        assert_eq!(interpret_err!(IEK::FnNotInScope("mystery".into())),
             interpreter.interpret(&vec![
                 Stmt::Expr(Expr::Call { callee: "mystery".into(), args: vec![] })
+            ])
+        );
+
+        /*
+            fn duplicate() {}
+            fn duplicate() {}
+         */
+        assert_eq!(interpret_err!(IEK::FnRedeclaration("duplicate".into())),
+            interpreter.interpret(&vec![
+                Stmt::FnDecl {
+                    name: "duplicate".into(),
+                    parameters: vec![],
+                    body: Box::new(Stmt::Block(vec![]))
+                },
+                Stmt::FnDecl {
+                    name: "duplicate".into(),
+                    parameters: vec![],
+                    body: Box::new(Stmt::Block(vec![]))
+                }
+            ])
+        );
+
+        /*
+            fn no_params() { 256; }
+            no_params(0);
+         */
+        assert_eq!(interpret_err!(IEK::FnBadArgs("no_params".into(), 0, 1)),
+            interpreter.interpret(&vec![
+                Stmt::FnDecl {
+                    name: "no_params".into(),
+                    parameters: vec![],
+                    body: Box::new(Stmt::Block(vec![]))
+                },
+                Stmt::Expr(Expr::Call {
+                    callee: "no_params".into(),
+                    args: vec![Expr::Int(0)]
+                })
+            ]
+        ));
+
+        /*
+            fn three_params(a, b, c) {}
+            three_params(32);
+         */
+        assert_eq!(interpret_err!(IEK::FnBadArgs(
+            "three_params".into(), 3, 1)),
+            interpreter.interpret(&vec![
+                Stmt::FnDecl {
+                    name: "three_params".into(),
+                    parameters: vec!["a".into(), "b".into(), "c".into()],
+                    body: Box::new(Stmt::Block(vec![]))
+                },
+                Stmt::Expr(Expr::Call {
+                    callee: "three_params".into(),
+                    args: vec![Expr::Int(32)]
+                })
             ])
         );
 
@@ -772,6 +840,30 @@ mod tests {
                 ]))
             },
             Stmt::Expr(Expr::Call { callee: "max".to_string(), args: vec![Expr::Int(128), Expr::Int(64)] })
+        ]));
+
+        /*
+        fn ree() { 0; }
+        
+        {
+            fn ree() { 1; }
+            ree();
+        }
+         */
+        assert_eq!(Ok(1), interpreter.interpret(&vec![
+            Stmt::FnDecl {
+                name: "ree".into(),
+                parameters: vec![],
+                body: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(0))]))
+            },
+            Stmt::Block(vec![
+                Stmt::FnDecl {
+                    name: "ree".into(),
+                    parameters: vec![],
+                    body: Box::new(Stmt::Block(vec![Stmt::Expr(Expr::Int(1))]))
+                },
+                Stmt::Expr(Expr::Call { callee: "ree".into(), args: vec![] })
+            ])
         ]));
         
         assert_eq!(1, interpreter.get_stack_size());

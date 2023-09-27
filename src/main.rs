@@ -24,13 +24,20 @@ fn main() {
     let parsed = match Parser::new(tokens).parse() {
         Ok(p) => p,
         Err(e) => {
-            println!("Parse error: {}", e);
+            println!("{}", e);
             return;  // Early exit main
         },
     };
     println!("{:?}", &parsed);
 
     let mut interpreter = Interpreter::new();
-    let result = interpreter.interpret(&parsed);
-    println!("Interpret result: {}", result.unwrap());
+    // let result = interpreter.interpret(&parsed);
+    let result = match interpreter.interpret(&parsed) {
+        Ok(out) => out,
+        Err(e) => {
+            println!("{}", e);
+            return  // Early exit main
+        },
+    };
+    println!("Interpreter result: {}", result);
 }

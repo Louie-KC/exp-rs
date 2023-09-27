@@ -1,4 +1,4 @@
-use crate::tokens::TokenKind;
+use crate::{tokens::TokenKind, ast::{Operator, Expr}};
 
 #[derive(Debug, PartialEq)]
 pub struct ParseError {
@@ -42,5 +42,50 @@ impl std::fmt::Display for ParseError {
             PEK::MissingIdentifier => "Parameter or variable name is not specified".into(),
         };
         write!(f, "Parse Error: {:?} on line: {}\nDescription: {}", self.kind, self.line_num, err_msg)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InterpretError {
+    // pub line_num: u32,
+    pub kind: InterpretErrorKind
+}
+
+#[derive(Debug, PartialEq)]
+pub enum InterpretErrorKind {
+    NoEnvironments,
+    VarNotInScope(String),
+    VarRedeclaration(String),
+    FnNotInScope(String),
+    FnRedeclaration(String),
+    FnBadArgs(String, usize, usize),
+    InvalidOperation(Operator, Box<Expr>),
+    PlaceHolderError
+}
+
+impl std::fmt::Display for InterpretError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use InterpretErrorKind as IEK;
+        let err_msg: String = match &self.kind {
+            IEK::NoEnvironments => "All environments have been cleared".into(),
+            IEK::VarNotInScope(name) => format!("Variable '{}' not in scope", name),
+            IEK::FnNotInScope(name)  => format!("Function '{}' not in scope", name),
+            IEK::FnBadArgs(name, expected, actual) => {
+                format!("Incorrect number of arguments were supplied with a '{}' function call\
+                \nFunction '{}' expected {} args, but found {}", name, name, expected, actual)
+            },
+            IEK::VarRedeclaration(name) => {
+                format!("The variable '{}' is declared more than once in the same scope", name)
+            },
+            IEK::FnRedeclaration(name)  => {
+                format!("The function '{}' is declared more than once in the same scope", name)
+            },
+            IEK::InvalidOperation(operator, operand) => {  // UNTESTED
+                format!("Cannot use the operator '{:?}' on '{:?}'.", operator, operand)
+            },
+            IEK::PlaceHolderError => "DEV TEST PLACEHOLDER - TO BE REMOVED".into(),  // UNTESTED
+            
+        };
+        write!(f, "Interpet/Run error: {:?}\nDescription: {}", self.kind, err_msg)
     }
 }
