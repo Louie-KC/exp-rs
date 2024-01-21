@@ -60,7 +60,7 @@ pub enum InterpretErrorKind {
     VarRedeclaration(String),
     FnNotInScope(String),
     FnRedeclaration(String),
-    FnBadArgs(String, usize, usize),
+    FnIncorrectNumArgs(String, usize, usize),
     InvalidOperation(Operator, Box<Expr>),
     PlaceHolderError
 }
@@ -72,7 +72,7 @@ impl std::fmt::Display for InterpretError {
             IEK::NoEnvironments => "All environments have been cleared".into(),
             IEK::VarNotInScope(name) => format!("Variable '{}' not in scope", name),
             IEK::FnNotInScope(name)  => format!("Function '{}' not in scope", name),
-            IEK::FnBadArgs(name, expected, actual) => {
+            IEK::FnIncorrectNumArgs(name, expected, actual) => {
                 format!("Incorrect number of arguments were supplied with a '{}' function call\
                 \nFunction '{}' expected {} args, but found {}", name, name, expected, actual)
             },

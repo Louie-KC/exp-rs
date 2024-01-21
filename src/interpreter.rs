@@ -36,13 +36,15 @@ impl Environment {
         Self { functions: HashMap::new(), variables: HashMap::new() }
     }
 
-    fn declare_function(&mut self, name: &String, func: Function) -> () {
+    fn declare_function(&mut self, name: &String, func: Function) -> InterpretResult<()> {
         if self.functions.contains_key(name) {
-            panic!("function \"{}\" already declared in scope", name)
+            interpret_err!(IEK::FnRedeclaration(name.clone()))
+        } else {
+            self.functions.insert(name.into(), func);
+            Ok(())
         }
-        self.functions.insert(name.into(), func);
     }
-
+    
     fn get_function(&self, name: &String) -> Option<&Function> {
         self.functions.get(name)
     }
@@ -120,26 +122,19 @@ impl Interpreter {
                 Ok(result)
             },
             Stmt::VarDecl(ident, value) => {
-                if let true = self.current_env_has_var(ident.into())? {
+                if self.current_env_has_var(ident.into())? {
                     return interpret_err!(IEK::VarRedeclaration(ident.into()))
                 }
                 let val = match value {
-                    Some(v) => self.evaluate_stmt(v).unwrap(),
+                    Some(v) => self.evaluate_stmt(v)?,
                     None => 0
                 };
-                self.add_var(ident.into(), val);
+                self.add_var(ident.into(), val)?;
                 Ok(val)  // use the value we just assigned
             },
             Stmt::FnDecl { name, parameters, body } => {
-                let env = match self.env_stack.last_mut() {
-                    Some(en) => en,
-                    None => return interpret_err!(IEK::NoEnvironments)
-                };
-                if env.get_function(name).is_some() {
-                    return interpret_err!(IEK::FnRedeclaration(name.into()))
-                }
                 let func = Function::new(parameters.to_owned(), *body.to_owned());
-                env.declare_function(name, func);
+                self.declare_function(name, func)?;
                 Ok(0)
             },
         }
@@ -151,12 +146,7 @@ impl Interpreter {
             Expr::Int(n)   => Ok(*n),
             Expr::Boolean(true)  => Ok(1),
             Expr::Boolean(false) => Ok(0),
-            Expr::Ident(s) => {
-                match self.get_var(s).cloned() {
-                    Some(val) => Ok(val),
-                    None => interpret_err!(IEK::VarNotInScope(s.into()))
-                }
-            },
+            Expr::Ident(s) => self.get_var(s).cloned(),
             Expr::Monadic { operator, operand } => {
                 let operand_value = self.evalulate_expr(operand)?;
                 match operator {
@@ -194,36 +184,25 @@ impl Interpreter {
                 }
             },
             Expr::Assign { var_name, new_value } => {
-                if self.get_var(var_name).is_none() {
-                    return interpret_err!(IEK::VarNotInScope(var_name.into()))
-                }
+                self.get_var(var_name)?;
                 let val = self.evalulate_expr(new_value)?;
-                self.update_var(var_name, val);
+                self.update_var(var_name, val)?;
                 Ok(val)
             },
             Expr::Call { callee, args } => {
-                // Search for environment with callee starting from inner most environment/scope
-                let Some(function) = self.env_stack.iter()
-                    .rev()
-                    .find(|env| env.get_function(callee).is_some())
-                    .and_then(|env| env.get_function(callee))
-                    else {
-                        return interpret_err!(IEK::FnNotInScope(callee.into()))
-                    };
-                    
+                let function = self.get_function(callee)?;
+
                 let params = &function.params;
                 if params.len() != args.len() {
-                    return interpret_err!(IEK::FnBadArgs(callee.into(), params.len(), args.len()))
+                    return interpret_err!(IEK::FnIncorrectNumArgs(callee.into(), params.len(), args.len()))
                 }
 
-                let mut block: Vec<Stmt> = params.into_iter()
-                    .enumerate()
-                    .map(|(i, n)| {
-                        let arg: Stmt = match args.get(i) {
-                            Some(val) => Stmt::Expr(val.clone()),
-                            None => panic!("Could not evaluate parameter {} of {} call", i, callee)
-                        };
-                        Stmt::VarDecl(n.into(), Some(Box::new(arg)))
+                // Prepend function body/block with variable declarations of parameters
+                // with argument values.
+                let mut block: Vec<Stmt> = params.iter()
+                    .zip(args.iter())
+                    .map(|(param_name, arg)| {
+                        Stmt::VarDecl(param_name.into(), Some(Box::new(Stmt::Expr(arg.clone()))))
                     })
                     .collect::<Vec<Stmt>>();
 
@@ -237,32 +216,23 @@ impl Interpreter {
     /// Determines whether a block statement needs its own variable environment added onto the
     /// environment stack by checking if the statements of the block make any declarations.
     fn block_needs_stack(&self, stack_body: &Vec<Stmt>) -> bool {
-        let var_decl = discriminant(&Stmt::VarDecl("".into(), None));
-        let fn_decl = discriminant(&Stmt::FnDecl {
+        let var_decl_disc = discriminant(&Stmt::VarDecl("".into(), None));
+        let fn_decl_disc = discriminant(&Stmt::FnDecl {
             name: "".into(), parameters: vec![], body: Box::new(Stmt::Block(vec![]))
         });
-        for stmt in stack_body {
-            let stmt_disc = discriminant(stmt);
-            if stmt_disc.eq(&var_decl) || stmt_disc.eq(&fn_decl) {
-                return true;
-            }
-        }
-        false
+        stack_body.iter()
+                  .map(|stmt| discriminant(stmt))
+                  .any(|disc| disc.eq(&var_decl_disc) || disc.eq(&fn_decl_disc))
     }
 
     /// Searches for the variable specified by the 'name' parameter and returns
     /// its value.
     /// The variable is searched for beginning from the current/inner-most scope.
-    fn get_var(&self, name: &String) -> Option<&i32> {
-        // println!("get_from_env:");
-        // dbg!(self.env_stack.clone());
-        let mut result = None;
-        // Begin outward search from inner most scope
-        for env in self.env_stack.iter().rev() {
-            result = env.get_var(name);
-            if result.is_some() { break; }
-        }
-        result
+    fn get_var(&self, name: &String) -> InterpretResult<&i32> {
+        self.env_stack.iter()
+                      .rev()
+                      .find_map(|env| env.get_var(name))
+                      .ok_or(InterpretError { kind: IEK::VarNotInScope(name.into()) })
     }
 
     /// Determines whether a variable with the parameter 'name' already exists
@@ -274,24 +244,45 @@ impl Interpreter {
         }
     }
 
-    /// Updates the value of an existing variable with the 'name' parameter.
-    /// The search for the specified variable works outwards from the inner most
-    /// scope.
-    fn update_var(&mut self, name: &String, value: i32) -> () {
+    /// Updates the value of an existing variable with the 'name' parameter. The
+    /// search for the specified variable works outwards from the inner most scope.
+    fn update_var(&mut self, name: &String, value: i32) -> InterpretResult<()> {
         for env in self.env_stack.iter_mut().rev() {
             if env.get_var(name).is_some() {
                 env.set_var(name, value);
-                return;
+                return Ok(());
             }
         }
-        panic!("Variable \"{}\" does not exist", name);
+        return interpret_err!(IEK::VarNotInScope(name.clone()))
     }
 
     /// Adds/declares a variable with the value to the current or inner most scope.
-    fn add_var(&mut self, name: &String, value: i32) -> () {
+    fn add_var(&mut self, name: &String, value: i32) -> InterpretResult<()> {
         match self.env_stack.last_mut() {
-            Some(env) => env.set_var(name, value),
-            None    => panic!("All enviroments have been cleared")
+            Some(env) => {
+                env.set_var(name, value);
+                Ok(())
+            },
+            None => interpret_err!(IEK::NoEnvironments)
+        }
+    }
+
+    /// Retrieve a function from the environment stack by `name`. The search
+    /// starts from the inner-most scope, and works outwards.
+    /// An InterpretError is returned if the function cannot be found.
+    fn get_function(&self, name: &String) -> InterpretResult<&Function> {
+        self.env_stack
+            .iter()
+            .rev()
+            .find_map(|env| env.get_function(name))
+            .ok_or(InterpretError { kind: IEK::FnNotInScope(name.into()) })
+    }
+
+    fn declare_function(&mut self, name: &String, func: Function) -> InterpretResult<()> {
+        if let Some(env) = self.env_stack.last_mut() {
+            env.declare_function(name, func)
+        } else {
+            interpret_err!(IEK::NoEnvironments)
         }
     }
 
@@ -745,7 +736,7 @@ mod tests {
             fn no_params() { 256; }
             no_params(0);
          */
-        assert_eq!(interpret_err!(IEK::FnBadArgs("no_params".into(), 0, 1)),
+        assert_eq!(interpret_err!(IEK::FnIncorrectNumArgs("no_params".into(), 0, 1)),
             interpreter.interpret(&vec![
                 Stmt::FnDecl {
                     name: "no_params".into(),
@@ -763,7 +754,7 @@ mod tests {
             fn three_params(a, b, c) {}
             three_params(32);
          */
-        assert_eq!(interpret_err!(IEK::FnBadArgs(
+        assert_eq!(interpret_err!(IEK::FnIncorrectNumArgs(
             "three_params".into(), 3, 1)),
             interpreter.interpret(&vec![
                 Stmt::FnDecl {
